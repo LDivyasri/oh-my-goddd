@@ -118,6 +118,8 @@ exports.sendTaskMessage = async (req, res) => {
         const senderId = req.user.id;
         const { type, content, mediaUrl } = req.body;
 
+        console.log(`[TaskController] sendTaskMessage: taskId=${taskId}, senderId=${senderId}, content=${content}`);
+
         await db.query(`
             INSERT INTO task_messages (task_id, sender_id, type, content, media_url)
             VALUES (?, ?, ?, ?, ?)

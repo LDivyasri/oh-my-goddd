@@ -231,6 +231,7 @@ const StageProgressScreen = ({ route, navigation }: any) => {
 
     // Chat Input
     const [messageText, setMessageText] = useState('');
+    const [sending, setSending] = useState(false);
     const [mediaUri, setMediaUri] = useState<string | null>(null);
     const [mediaType, setMediaType] = useState<'image' | 'video' | 'audio' | null>(null);
     const [recording, setRecording] = useState<Audio.Recording | undefined>(undefined);
@@ -399,7 +400,9 @@ const StageProgressScreen = ({ route, navigation }: any) => {
 
     useFocusEffect(
         React.useCallback(() => {
+            console.log('[StageProgress] useFocusEffect triggered');
             if (!phaseId && !taskId) {
+                console.warn('[StageProgress] Missing phaseId and taskId');
                 Alert.alert("Error", "Invalid Context");
                 navigation.goBack();
                 return;
@@ -408,12 +411,22 @@ const StageProgressScreen = ({ route, navigation }: any) => {
         }, [phaseId, taskId])
     );
 
+    // Add fallback useEffect for Modal scenarios where focus effect might not trigger
+    useEffect(() => {
+        if (phaseId || taskId) {
+            console.log('[StageProgress] useEffect triggered for:', { phaseId, taskId });
+            fetchData();
+        }
+    }, [phaseId, taskId]);
+
     const fetchData = async () => {
         try {
+            console.log('[StageProgress] fetchData started');
             if (taskId) {
                 // TASK MODE
                 console.log(`[StageProgress] Fetching Task Details for ID: ${taskId}`);
                 const response = await api.get(`/tasks/${taskId}`);
+                console.log('[StageProgress] Response received for task:', response.data?.task?.id);
                 const taskData = response.data.task;
 
                 // Set Phase Data (Partial or Derived)
@@ -482,7 +495,9 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                     return task.assignments && task.assignments.some((a: any) => String(a.id) === String(user?.id));
                 });
 
-                setSubTasks(myTasks);
+                // SHOW ALL TASKS FOR DEBUGGING (Temporary)
+                // setSubTasks(myTasks);
+                setSubTasks(tasks);
 
                 // Filter out duplicate consecutive updates
                 const allUpdates = response.data.updates || [];
@@ -504,6 +519,7 @@ const StageProgressScreen = ({ route, navigation }: any) => {
             Alert.alert("Error", "Failed to load details");
         } finally {
             setLoading(false);
+            console.log('[StageProgress] fetchData finished. loading=false');
         }
     };
 
@@ -602,35 +618,41 @@ const StageProgressScreen = ({ route, navigation }: any) => {
         }
     };
 
-    const handleApprovePhase = async () => {
+    const handleApprove = async () => {
         const currentPhaseId = phaseId || phase?.id;
-        if (!currentPhaseId) {
-            Alert.alert("Error", "Phase ID not found");
-            return;
-        }
 
         try {
-            await api.put(`/phases/${currentPhaseId}/approve`);
-            setPhase((prev: any) => ({ ...prev, status: 'Completed' }));
-            Alert.alert("✅ Good work!", "Phase approved and marked as completed");
+            if (taskId) {
+                // TASK MODE
+                await api.put(`/tasks/${taskId}/approve`);
+                Alert.alert("Success", "Task approved and marked as completed");
+            } else {
+                // PHASE MODE
+                if (!currentPhaseId) {
+                    Alert.alert("Error", "Phase ID not found");
+                    return;
+                }
+                await api.put(`/phases/${currentPhaseId}/approve`);
+                Alert.alert("Success", "Phase approved and marked as completed");
+            }
+
+            // Common Success State Update
+            setPhase((prev: any) => ({ ...prev, status: 'Completed', progress: 100 }));
+            // Also update all subtasks to completed if needed/visual
             fetchData();
+
         } catch (error) {
-            console.error('Error approving phase:', error);
-            Alert.alert("Error", "Failed to approve phase");
+            console.error('Error approving:', error);
+            Alert.alert("Error", "Failed to approve");
         }
     };
 
-    const handleRejectPhase = () => {
-        // Open modal to get reason
+    const handleReject = () => {
         setChangeRequestModalVisible(true);
     };
 
-    const submitChangeRequest = async () => {
+    const submitReject = async () => {
         const currentPhaseId = phaseId || phase?.id;
-        if (!currentPhaseId) {
-            Alert.alert("Error", "Phase ID not found");
-            return;
-        }
 
         if (!changeRequestReason.trim()) {
             Alert.alert("Required", "Please enter a reason for requesting changes");
@@ -638,14 +660,25 @@ const StageProgressScreen = ({ route, navigation }: any) => {
         }
 
         try {
-            await api.put(`/phases/${currentPhaseId}/reject`, { reason: changeRequestReason });
+            if (taskId) {
+                // TASK MODE
+                await api.put(`/tasks/${taskId}/reject`, { reason: changeRequestReason });
+                Alert.alert("Success", "Changes requested. Task reverted to In Progress.");
+            } else {
+                // PHASE MODE
+                if (!currentPhaseId) return;
+                await api.put(`/phases/${currentPhaseId}/reject`, { reason: changeRequestReason });
+                Alert.alert("Success", "Changes requested. Phase sent back for revisions");
+            }
+
+            // Common Success State Update
             setPhase((prev: any) => ({ ...prev, status: 'in_progress', progress: 0 }));
             setChangeRequestModalVisible(false);
             setChangeRequestReason('');
-            Alert.alert("✓ Changes Requested", "Phase sent back for revisions");
             fetchData();
+
         } catch (error) {
-            console.error('Error rejecting phase:', error);
+            console.error('Error rejecting:', error);
             Alert.alert("Error", "Failed to request changes");
         }
     };
@@ -731,12 +764,18 @@ const StageProgressScreen = ({ route, navigation }: any) => {
 
 
     const handleSendMessage = async (customContent?: string) => {
+        console.log('[StageProgress] handleSendMessage called', { customContent, messageText });
         const contentToSend = customContent !== undefined ? customContent : messageText;
-        if (!contentToSend.trim() && !mediaUri && !recording) return;
+        if (!contentToSend.trim() && !mediaUri && !recording) {
+            console.log('[StageProgress] Nothing to send');
+            return;
+        }
 
         try {
+            setSending(true);
             let uploadedUrl = null;
             if (mediaUri && mediaType) {
+                console.log('[StageProgress] Uploading media...');
                 uploadedUrl = await uploadMedia(mediaUri, mediaType);
             }
 
@@ -745,24 +784,30 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                 type: mediaType || 'text',
                 mediaUrl: uploadedUrl
             };
+            console.log('[StageProgress] Sending payload:', payload);
 
             if (taskId) {
                 // TASK Chat
+                console.log(`[StageProgress] POST /tasks/${taskId}/messages`);
                 await api.post(`/tasks/${taskId}/messages`, payload);
             } else {
                 // STAGE Chat
+                console.log(`[StageProgress] POST /phases/${phaseId}/messages`);
                 await api.post(`/phases/${phaseId}/messages`, payload);
             }
+            console.log('[StageProgress] Message Sent Successfully');
 
             setMessageText('');
             setMediaUri(null);
             setMediaType(null);
 
             // Refresh
-            fetchData();
+            await fetchData();
         } catch (error) {
             console.error('Error sending message:', error);
             Alert.alert("Error", "Failed to send message");
+        } finally {
+            setSending(false);
         }
     };
 
@@ -902,13 +947,13 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                     <View style={{ flexDirection: 'row', gap: 8 }}>
                         <TouchableOpacity
                             style={{ backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
-                            onPress={handleApprovePhase}
+                            onPress={handleApprove}
                         >
                             <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>✓ Approve</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={{ backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
-                            onPress={handleRejectPhase}
+                            onPress={handleReject}
                         >
                             <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>✗ Changes</Text>
                         </TouchableOpacity>
@@ -969,10 +1014,12 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                             borderLeftColor: '#F59E0B'
                         }}>
                             <Text style={{ color: '#92400E', fontWeight: '600', fontSize: 14 }}>
-                                ⏳ Submitted for Admin Approval
+                                {isAdmin ? '⏳ Review Required' : '⏳ Submitted for Admin Approval'}
                             </Text>
                             <Text style={{ color: '#78350F', fontSize: 12, marginTop: 4 }}>
-                                Your work has been submitted and is waiting for admin review.
+                                {isAdmin
+                                    ? 'This stage has been completed and is waiting for your approval.'
+                                    : 'Your work has been submitted and is waiting for admin review.'}
                             </Text>
                         </View>
                     )}
@@ -1220,9 +1267,9 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                                         }
                                     }}
                                     onLongPress={!messageText.trim() && !mediaUri ? startRecording : undefined}
-                                    disabled={loading || (!!mediaUri && !mediaType)}
+                                    disabled={loading || sending || (!!mediaUri && !mediaType)}
                                 >
-                                    {loading && (messageText || mediaUri) ? ( // visual feedback if sending
+                                    {(loading || sending) && (messageText || mediaUri) ? ( // visual feedback if sending
                                         <ActivityIndicator size="small" color="#8B0000" />
                                     ) : (
                                         <Ionicons
@@ -1393,7 +1440,7 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.submitButton]}
-                                onPress={submitChangeRequest}
+                                onPress={submitReject}
                             >
                                 <Text style={styles.submitButtonText}>Submit</Text>
                             </TouchableOpacity>

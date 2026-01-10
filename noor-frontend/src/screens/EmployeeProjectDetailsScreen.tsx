@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert } from 'react-native';
+import * as React from 'react';
+import { useState, useEffect, useContext } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
-
 import { useFocusEffect } from '@react-navigation/native';
 
 const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
@@ -11,8 +11,8 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
     const { user } = useContext(AuthContext);
     const [phases, setPhases] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-
     const [activeTab, setActiveTab] = useState('Tasks');
+    const [expandedPhaseIds, setExpandedPhaseIds] = useState<number[]>([]);
 
     const fetchProjectDetails = async () => {
         try {
@@ -27,9 +27,8 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
             // Filter tasks for this site
             const siteTasks = myTasks.filter(t => t.site_id === Number(siteId));
 
-            // Filter phases: relevant if assigned to user OR contains assigned tasks
             const relevantPhases = allPhases.filter((p: any) => {
-                const isPhaseAssigned = p.assigned_to === user?.id;
+                const isPhaseAssigned = p.assigned_to === user?.id; // Phase Lead
                 const hasTaskAssigned = siteTasks.some(t => t.phase_id === p.id);
                 return isPhaseAssigned || hasTaskAssigned;
             }).map((p: any) => ({
@@ -38,6 +37,12 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
             }));
 
             setPhases(relevantPhases);
+
+            // Auto-expand first phase if available
+            if (relevantPhases.length > 0) {
+                setExpandedPhaseIds([relevantPhases[0].id]);
+            }
+
         } catch (error) {
             console.error('Error fetching project details:', error);
             Alert.alert('Error', 'Failed to load project details');
@@ -52,98 +57,26 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
         }, [siteId])
     );
 
+    const togglePhase = (phaseId: number) => {
+        setExpandedPhaseIds(prev =>
+            prev.indexOf(phaseId) > -1
+                ? prev.filter(id => id !== phaseId)
+                : [...prev, phaseId]
+        );
+    };
+
+    const handleTaskClick = (task: any) => {
+        // Navigate to StageProgress (Unified Task/Chat View)
+        navigation.navigate('StageProgress', { taskId: task.id, siteName });
+    };
+
     const handleViewProgress = (phase: any) => {
         navigation.navigate('StageProgress', { phaseId: phase.id, siteName });
     };
 
-    const renderPhaseItem = ({ item, index }: any) => {
-        const isPhaseAssigned = item.assigned_to === user?.id;
-
-        // Status Color Logic
-        let statusColor = '#F59E0B'; // Pending/Ongoing
-        if (item.status === 'Completed') statusColor = '#10B981';
-        if (item.status === 'Delayed') statusColor = '#EF4444';
-
-        return (
-            <View style={styles.phaseCard}>
-                <View style={[styles.phaseHeader, { borderLeftColor: statusColor }]}>
-                    <View style={styles.headerContent}>
-                        <View style={styles.numberBadge}>
-                            <Text style={styles.numberText}>{item.order_num || index + 1}</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.phaseName}>{item.name}</Text>
-                            <Text style={styles.phaseDates}>
-                                {item.start_date ? new Date(item.start_date).toLocaleDateString() : 'TBD'} - {item.due_date ? new Date(item.due_date).toLocaleDateString() : 'TBD'}
-                            </Text>
-                        </View>
-                        {isPhaseAssigned && (
-                            <View style={styles.meBadge}>
-                                <Text style={styles.meBadgeText}>PHASE LEAD</Text>
-                            </View>
-                        )}
-                    </View>
-
-                    {/* Phase Progress Bar */}
-                    <View style={styles.progressRow}>
-                        <Text style={{ fontSize: 12, color: '#6B7280' }}>Phase Progress: <Text style={{ fontWeight: '700', color: '#111827' }}>{item.progress || 0}%</Text></Text>
-                        <View style={styles.miniBarBg}>
-                            <View style={[styles.miniBarFill, { width: `${item.progress || 0}%`, backgroundColor: statusColor }]} />
-                        </View>
-                    </View>
-                </View>
-
-                {/* My Tasks List */}
-                {item.myTasks && item.myTasks.length > 0 && (
-                    <View style={{ paddingHorizontal: 16, paddingBottom: 16, paddingTop: 4 }}>
-                        {item.myTasks.map((task: any) => (
-                            <TouchableOpacity
-                                key={task.id}
-                                style={styles.taskItem}
-                                onPress={() => navigation.navigate('EmployeeTaskDetail', { taskId: task.id })}
-                            >
-                                <View style={{ flex: 1 }}>
-                                    <Text style={styles.taskTitle}>{task.name}</Text>
-                                    <Text style={styles.taskDate}>
-                                        Due: {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No Due Date'}
-                                    </Text>
-                                </View>
-                                <View style={[
-                                    styles.taskStatusBadge,
-                                    { backgroundColor: task.status === 'completed' ? '#DCFCE7' : '#F3F4F6' }
-                                ]}>
-                                    <Text style={[
-                                        styles.taskStatusText,
-                                        { color: task.status === 'completed' ? '#166534' : '#4B5563' }
-                                    ]}>
-                                        {task.status === 'completed' ? 'Completed' : 'Pending'}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                )}
-
-                {/* Actions */}
-                <View style={styles.actionRow}>
-                    <View style={[styles.statusTag, { backgroundColor: statusColor + '20' }]}>
-                        <Text style={[styles.statusTagText, { color: statusColor }]}>{item.status || 'Pending'}</Text>
-                    </View>
-
-                    {isPhaseAssigned ? (
-                        <TouchableOpacity
-                            style={styles.viewProgressBtn}
-                            onPress={() => handleViewProgress(item)}
-                        >
-                            <Ionicons name="bar-chart-outline" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                            <Text style={styles.btnText}>Manage Phase</Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <View />
-                    )}
-                </View>
-            </View>
-        );
+    const formatDate = (dateStr: string) => {
+        if (!dateStr) return 'TBD';
+        return new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     };
 
     return (
@@ -157,25 +90,26 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                 </TouchableOpacity>
                 <View>
                     <Text style={styles.headerTitle}>{siteName || 'Project Details'}</Text>
-                    <Text style={styles.headerSubtitle}>Project Timeline</Text>
+                    <Text style={styles.headerSubtitle}>Project Board</Text>
                 </View>
                 <View style={{ width: 40 }} />
             </View>
 
             {/* Tabs */}
-            <View style={styles.tabContainer}>
-                <TouchableOpacity
-                    style={[styles.tabButton, activeTab === 'Tasks' && styles.activeTabButton]}
-                    onPress={() => setActiveTab('Tasks')}
-                >
-                    <Text style={[styles.tabText, activeTab === 'Tasks' && styles.activeTabText]}>Tasks</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.tabButton, activeTab === 'Materials' && styles.activeTabButton]}
-                    onPress={() => setActiveTab('Materials')}
-                >
-                    <Text style={[styles.tabText, activeTab === 'Materials' && styles.activeTabText]}>Materials</Text>
-                </TouchableOpacity>
+            <View style={styles.modalTabsContainer}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {['Tasks', 'Materials'].map(tab => (
+                        <TouchableOpacity
+                            key={tab}
+                            style={[styles.modalTab, activeTab === tab && styles.modalTabActive]}
+                            onPress={() => setActiveTab(tab)}
+                        >
+                            <Text style={[styles.modalTabText, activeTab === tab && styles.modalTabTextActive]}>
+                                {tab}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
             </View>
 
             {loading ? (
@@ -183,26 +117,134 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                     <ActivityIndicator size="large" color="#8B0000" />
                 </View>
             ) : (
-                <>
+                <ScrollView style={styles.modalBody} contentContainerStyle={{ padding: 16 }}>
                     {activeTab === 'Tasks' ? (
-                        <FlatList
-                            data={phases}
-                            renderItem={renderPhaseItem}
-                            keyExtractor={(item) => item.id.toString()}
-                            contentContainerStyle={styles.listContent}
-                            ListEmptyComponent={
+                        <>
+                            {phases.length === 0 ? (
                                 <View style={styles.emptyContainer}>
                                     <Text style={styles.emptyText}>No assigned tasks or phases found.</Text>
                                 </View>
-                            }
-                        />
+                            ) : (
+                                phases.map((phase) => {
+                                    const isExpanded = expandedPhaseIds.indexOf(phase.id) > -1;
+                                    // Status Logic
+                                    let statusColor = '#F59E0B';
+                                    if (phase.status === 'Completed') statusColor = '#10B981';
+                                    if (phase.status === 'Delayed') statusColor = '#EF4444';
+
+                                    const isPhaseAssigned = phase.assigned_to === user?.id;
+
+                                    return (
+                                        <View key={phase.id} style={[styles.phaseAccordion, phase.status === 'Completed' && styles.phaseAccordionCompleted]}>
+                                            <TouchableOpacity
+                                                style={[styles.phaseHeader, phase.status !== 'Completed' ? styles.phaseHeaderDark : styles.phaseHeaderCompleted, isExpanded && styles.phaseHeaderExpanded]}
+                                                onPress={() => togglePhase(phase.id)}
+                                                activeOpacity={0.9}
+                                            >
+                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    {phase.status === 'Completed' ? (
+                                                        <View style={styles.completedBadgeIcon}>
+                                                            <Ionicons name="checkmark" size={16} color="#059669" />
+                                                        </View>
+                                                    ) : (
+                                                        <View style={styles.phaseNumberBadge}>
+                                                            <Text style={styles.phaseNumberText}>{phase.order_num}</Text>
+                                                        </View>
+                                                    )}
+
+                                                    <View>
+                                                        <Text style={phase.status === 'Completed' ? styles.phaseTitleCompleted : styles.phaseTitleWhite}>
+                                                            {phase.name}
+                                                        </Text>
+                                                        <Text style={phase.status === 'Completed' ? styles.phaseSubtitleCompleted : styles.phaseSubtitleLight}>
+                                                            {formatDate(phase.start_date)} - {formatDate(phase.due_date)}
+                                                        </Text>
+                                                    </View>
+
+                                                    {isPhaseAssigned && (
+                                                        <View style={[styles.meBadge, { marginLeft: 8 }]}>
+                                                            <Text style={styles.meBadgeText}>LEAD</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
+
+                                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                    {isPhaseAssigned && (
+                                                        <TouchableOpacity style={{ marginRight: 8 }} onPress={() => handleViewProgress(phase)}>
+                                                            <Ionicons name="bar-chart" size={20} color={phase.status === 'Completed' ? '#059669' : '#fff'} />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                    <Ionicons
+                                                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                                                        size={20}
+                                                        color={phase.status === 'Completed' ? '#059669' : '#fff'}
+                                                    />
+                                                </View>
+                                            </TouchableOpacity>
+
+                                            {isExpanded && (
+                                                <View style={styles.taskList}>
+                                                    {phase.myTasks && phase.myTasks.length > 0 ? (
+                                                        phase.myTasks.map((task: any) => (
+                                                            <TouchableOpacity
+                                                                key={task.id}
+                                                                style={styles.taskItem}
+                                                                onPress={() => handleTaskClick(task)}
+                                                            >
+                                                                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                                                    <View style={[styles.radioButton, task.status === 'completed' && styles.radioButtonSelected]} />
+                                                                    <View style={{ marginLeft: 12, flex: 1 }}>
+                                                                        <Text style={[styles.taskTitle, task.status === 'completed' && styles.taskCompletedText]}>
+                                                                            {task.name}
+                                                                        </Text>
+                                                                        <Text style={styles.taskSubtitle}>
+                                                                            Due: {formatDate(task.due_date)}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+
+                                                                <View style={[
+                                                                    styles.statusPill,
+                                                                    task.status === 'completed' ? styles.statusCompleted :
+                                                                        task.status === 'in_progress' ? styles.statusProgress : styles.statusPending
+                                                                ]}>
+                                                                    <Text style={[
+                                                                        styles.statusText,
+                                                                        task.status === 'completed' ? styles.statusTextCompleted :
+                                                                            task.status === 'in_progress' ? styles.statusTextProgress : styles.statusTextPending
+                                                                    ]}>
+                                                                        {task.status === 'completed' ? 'Done' :
+                                                                            task.status === 'waiting_for_approval' ? 'Review' : 'Pending'}
+                                                                    </Text>
+                                                                </View>
+                                                            </TouchableOpacity>
+                                                        ))
+                                                    ) : (
+                                                        <Text style={styles.noTasksText}>No tasks assigned to you in this stage.</Text>
+                                                    )}
+                                                </View>
+                                            )}
+                                        </View>
+                                    );
+                                })
+                            )}
+                        </>
                     ) : (
-                        <View style={styles.emptyContainer}>
-                            <Ionicons name="construct-outline" size={48} color="#D1D5DB" />
-                            <Text style={[styles.emptyText, { marginTop: 12 }]}>No materials assigned yet.</Text>
+                        <View style={styles.tabContentContainer}>
+                            <View style={[styles.sectionHeaderRow, { justifyContent: 'space-between', marginBottom: 20 }]}>
+                                <Text style={styles.tabSectionTitle}>Material Requests</Text>
+                                <TouchableOpacity style={styles.addButtonSmall} onPress={() => Alert.alert("Request Material", "Feature coming soon!")}>
+                                    <Ionicons name="add" size={18} color="#fff" />
+                                    <Text style={styles.addButtonTextSmall}>Request</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.emptyTabState}>
+                                <Ionicons name="cube-outline" size={48} color="#e5e7eb" />
+                                <Text style={styles.emptyTabText}>No material requests found.</Text>
+                            </View>
                         </View>
                     )}
-                </>
+                </ScrollView>
             )}
         </SafeAreaView>
     );
@@ -240,122 +282,194 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#6B7280',
     },
-    listContent: {
-        padding: 16,
-        paddingBottom: 40,
+    // Tabs
+    modalTabsContainer: {
+        maxHeight: 50,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+        paddingHorizontal: 10,
     },
-    phaseCard: {
-        backgroundColor: '#FFF',
+    modalTab: {
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        marginRight: 4,
+        borderBottomWidth: 2,
+        borderBottomColor: 'transparent',
+    },
+    modalTabActive: {
+        borderBottomColor: '#8B0000',
+    },
+    modalTabText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#6b7280',
+    },
+    modalTabTextActive: {
+        color: '#8B0000',
+    },
+    modalBody: {
+        flex: 1,
+        backgroundColor: '#f9fafb',
+    },
+    // Phase Accordion
+    phaseAccordion: {
+        marginBottom: 12,
         borderRadius: 12,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-        elevation: 1,
         borderWidth: 1,
         borderColor: '#E5E7EB',
-        overflow: 'hidden',
+        backgroundColor: '#FFFFFF',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+        overflow: 'hidden'
+    },
+    phaseAccordionCompleted: {
+        borderColor: '#10b981',
+        backgroundColor: '#ecfdf5',
     },
     phaseHeader: {
-        padding: 16,
-        borderLeftWidth: 4,
-    },
-    headerContent: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 12,
+        justifyContent: 'space-between',
+        padding: 16,
     },
-    numberBadge: {
+    phaseHeaderDark: {
+        backgroundColor: '#8B0000',
+    },
+    phaseHeaderCompleted: {
+        backgroundColor: '#ecfdf5',
+    },
+    phaseHeaderExpanded: {
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.1)',
+    },
+    phaseNumberBadge: {
         width: 24,
         height: 24,
         borderRadius: 12,
-        backgroundColor: '#F3F4F6',
+        backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 12,
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
     },
-    numberText: {
+    phaseNumberText: {
         fontSize: 12,
-        fontWeight: '700',
-        color: '#6B7280',
+        fontWeight: 'bold',
+        color: '#8B0000',
     },
-    phaseName: {
+    completedBadgeIcon: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#d1fae5',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    phaseTitleWhite: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#111827',
-        marginBottom: 2,
+        color: '#FFFFFF',
     },
-    phaseDates: {
+    phaseTitleCompleted: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#064e3b',
+    },
+    phaseSubtitleLight: {
         fontSize: 12,
-        color: '#9CA3AF',
+        color: 'rgba(255,255,255,0.8)',
+        marginTop: 2,
     },
+    phaseSubtitleCompleted: {
+        fontSize: 12,
+        color: '#047857',
+        marginTop: 2,
+    },
+    taskList: {
+        padding: 16,
+        backgroundColor: '#fff',
+    },
+    taskItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f3f4f6',
+    },
+    radioButton: {
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        borderWidth: 2,
+        borderColor: '#d1d5db',
+    },
+    radioButtonSelected: {
+        borderColor: '#059669',
+        backgroundColor: '#059669',
+    },
+    taskTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#1f2937',
+    },
+    taskCompletedText: {
+        textDecorationLine: 'line-through',
+        color: '#9ca3af',
+    },
+    taskSubtitle: {
+        fontSize: 12,
+        color: '#6b7280',
+        marginTop: 2,
+    },
+    noTasksText: {
+        fontSize: 13,
+        color: '#9ca3af',
+        fontStyle: 'italic',
+        textAlign: 'center',
+        padding: 10,
+    },
+    // Badges/Pills
+    statusPill: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    statusCompleted: {
+        backgroundColor: '#ecfdf5',
+        borderColor: '#a7f3d0',
+    },
+    statusProgress: {
+        backgroundColor: '#eff6ff',
+        borderColor: '#bfdbfe',
+    },
+    statusPending: {
+        backgroundColor: '#fef2f2',
+        borderColor: '#fecaca',
+    },
+    statusText: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    statusTextCompleted: { color: '#059669' },
+    statusTextProgress: { color: '#2563eb' },
+    statusTextPending: { color: '#dc2626' },
+
     meBadge: {
         backgroundColor: '#DCFCE7',
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 4,
-        marginLeft: 8,
     },
     meBadgeText: {
         fontSize: 10,
         fontWeight: '700',
         color: '#166534',
-    },
-    progressRow: {
-        marginTop: 4,
-    },
-    miniBarBg: {
-        height: 4,
-        backgroundColor: '#F3F4F6',
-        borderRadius: 2,
-        marginTop: 6,
-        overflow: 'hidden',
-    },
-    miniBarFill: {
-        height: '100%',
-    },
-    actionRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingBottom: 16,
-    },
-    statusTag: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    statusTagText: {
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    viewProgressBtn: {
-        backgroundColor: '#8B0000',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 8,
-    },
-    btnText: {
-        color: '#FFF',
-        fontWeight: '600',
-        fontSize: 13,
-    },
-    disabledBtn: {
-        backgroundColor: '#F3F4F6',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 8,
-    },
-    disabledBtnText: {
-        color: '#9CA3AF',
-        fontWeight: '600',
-        fontSize: 13,
     },
     emptyContainer: {
         padding: 40,
@@ -365,57 +479,47 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         fontSize: 14,
     },
-    tabContainer: {
+    // Materials Tab Styles
+    tabContentContainer: {
+        padding: 16,
+    },
+    sectionHeaderRow: {
         flexDirection: 'row',
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 8,
-        backgroundColor: '#fff',
-    },
-    tabButton: {
-        paddingVertical: 8,
-        paddingHorizontal: 20,
-        borderRadius: 20,
-        marginRight: 10,
-        backgroundColor: '#F3F4F6',
-    },
-    activeTabButton: {
-        backgroundColor: '#FEE2E2',
-    },
-    tabText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#6B7280',
-    },
-    activeTabText: {
-        color: '#8B0000',
-    },
-    taskItem: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
     },
-    taskTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#1F2937',
-        marginBottom: 4,
-    },
-    taskDate: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    taskStatusBadge: {
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
-    },
-    taskStatusText: {
-        fontSize: 10,
+    tabSectionTitle: {
+        fontSize: 16,
         fontWeight: '700',
+        color: '#1f2937',
+    },
+    addButtonSmall: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#8B0000',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
+    },
+    addButtonTextSmall: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#fff',
+        marginLeft: 4,
+    },
+    emptyTabState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 40,
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        borderStyle: 'dashed',
+    },
+    emptyTabText: {
+        fontSize: 14,
+        color: '#9ca3af',
+        marginTop: 12,
     },
 });
 

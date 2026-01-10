@@ -979,6 +979,9 @@ exports.getTaskDetails = async (req, res) => {
     try {
         const { taskId } = req.params;
         const employeeId = req.user.id;
+        const requesterRole = req.user.role;
+
+        console.log(`[SiteController] getTaskDetails calling for taskId: ${taskId} by user: ${employeeId} (${requesterRole})`);
 
         // 1. Task Basic Info
         const [tasks] = await db.query(`
