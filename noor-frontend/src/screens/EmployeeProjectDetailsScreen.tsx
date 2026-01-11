@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect, useContext } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert, ScrollView, Modal, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
@@ -13,6 +13,58 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('Tasks');
     const [expandedPhaseIds, setExpandedPhaseIds] = useState<number[]>([]);
+
+    // Material State
+    const [materials, setMaterials] = useState<any[]>([]);
+    const [requestModalVisible, setRequestModalVisible] = useState(false);
+    const [newRequest, setNewRequest] = useState({ materialName: '', quantity: '', notes: '' });
+
+    const fetchMaterials = async () => {
+        try {
+            const response = await api.get(`/sites/${siteId}/materials`);
+            setMaterials(response.data.requests || []);
+        } catch (error) {
+            console.error('Error fetching materials:', error);
+        }
+    };
+
+    const handleSubmitRequest = async () => {
+        if (!newRequest.materialName || !newRequest.quantity) {
+            Alert.alert('Error', 'Material Name and Quantity are required');
+            return;
+        }
+
+        try {
+            await api.post('/materials', {
+                siteId,
+                ...newRequest
+            });
+            Alert.alert('Success', 'Material request submitted');
+            setRequestModalVisible(false);
+            setNewRequest({ materialName: '', quantity: '', notes: '' });
+            fetchMaterials();
+        } catch (error) {
+            console.error('Error submitting request:', error);
+            Alert.alert('Error', 'Failed to submit request');
+        }
+    };
+
+    const handleMarkReceived = async (reqId: number) => {
+        try {
+            await api.put(`/materials/${reqId}/received`);
+            fetchMaterials(); // Refresh list
+        } catch (error) {
+            console.error('Error marking received:', error);
+            Alert.alert('Error', 'Failed to update status');
+        }
+    };
+
+    // Refresh materials when tab is active
+    useEffect(() => {
+        if (activeTab === 'Materials') {
+            fetchMaterials();
+        }
+    }, [activeTab]);
 
     const fetchProjectDetails = async () => {
         try {
@@ -233,19 +285,114 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                         <View style={styles.tabContentContainer}>
                             <View style={[styles.sectionHeaderRow, { justifyContent: 'space-between', marginBottom: 20 }]}>
                                 <Text style={styles.tabSectionTitle}>Material Requests</Text>
-                                <TouchableOpacity style={styles.addButtonSmall} onPress={() => Alert.alert("Request Material", "Feature coming soon!")}>
+                                <TouchableOpacity style={styles.addButtonSmall} onPress={() => setRequestModalVisible(true)}>
                                     <Ionicons name="add" size={18} color="#fff" />
                                     <Text style={styles.addButtonTextSmall}>Request</Text>
                                 </TouchableOpacity>
                             </View>
-                            <View style={styles.emptyTabState}>
-                                <Ionicons name="cube-outline" size={48} color="#e5e7eb" />
-                                <Text style={styles.emptyTabText}>No material requests found.</Text>
-                            </View>
+
+                            {materials.length === 0 ? (
+                                <View style={styles.emptyTabState}>
+                                    <Ionicons name="cube-outline" size={48} color="#e5e7eb" />
+                                    <Text style={styles.emptyTabText}>No material requests found.</Text>
+                                </View>
+                            ) : (
+                                materials.map((item) => (
+                                    <View key={item.id} style={styles.materialCard}>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                            <Text style={styles.materialName}>{item.material_name}</Text>
+                                            <View style={[styles.statusBadge,
+                                            item.status === 'Approved' ? styles.badgeApproved :
+                                                item.status === 'Rejected' ? styles.badgeRejected :
+                                                    item.status === 'Received' ? styles.badgeReceived : styles.badgePending
+                                            ]}>
+                                                <Text style={[styles.statusBadgeText,
+                                                item.status === 'Approved' ? styles.textApproved :
+                                                    item.status === 'Rejected' ? styles.textRejected :
+                                                        item.status === 'Received' ? styles.textReceived : styles.textPending
+                                                ]}>{item.status}</Text>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.materialMeta}>Qty: {item.quantity} • {formatDate(item.created_at)}</Text>
+                                        {item.notes && <Text style={styles.materialNotes}>"{item.notes}"</Text>}
+
+                                        {item.status === 'Approved' && (
+                                            <TouchableOpacity
+                                                style={styles.markReceivedBtn}
+                                                onPress={() => handleMarkReceived(item.id)}
+                                            >
+                                                <Ionicons name="checkmark-circle-outline" size={16} color="#059669" />
+                                                <Text style={styles.markReceivedText}>Mark as Received</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                        {item.status === 'Received' && (
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                                                <Ionicons name="checkbox" size={16} color="#059669" />
+                                                <Text style={{ marginLeft: 4, color: '#059669', fontSize: 12, fontWeight: '600' }}>Received</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                ))
+                            )}
                         </View>
                     )}
                 </ScrollView>
             )}
+
+            {/* Request Material Modal */}
+            <Modal
+                visible={requestModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setRequestModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.requestModalContent}>
+                        <View style={styles.requestModalHeader}>
+                            <Text style={styles.requestModalTitle}>Request Material</Text>
+                            <TouchableOpacity onPress={() => setRequestModalVisible(false)}>
+                                <Ionicons name="close" size={24} color="#6b7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Material Name <Text style={{ color: 'red' }}>*</Text></Text>
+                            <TextInput
+                                style={styles.inputField}
+                                placeholder="e.g. Cement Bags, wiring"
+                                value={newRequest.materialName}
+                                onChangeText={(t) => setNewRequest({ ...newRequest, materialName: t })}
+                            />
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Quantity <Text style={{ color: 'red' }}>*</Text></Text>
+                            <TextInput
+                                style={styles.inputField}
+                                placeholder="e.g. 50 bags"
+                                value={newRequest.quantity}
+                                onChangeText={(t) => setNewRequest({ ...newRequest, quantity: t })}
+                            />
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Notes (Opional)</Text>
+                            <TextInput
+                                style={[styles.inputField, { height: 80 }]}
+                                multiline
+                                placeholder="Any additional details..."
+                                value={newRequest.notes}
+                                onChangeText={(t) => setNewRequest({ ...newRequest, notes: t })}
+                                textAlignVertical="top"
+                            />
+                        </View>
+
+                        <TouchableOpacity style={styles.submitRequestBtn} onPress={handleSubmitRequest}>
+                            <Text style={styles.submitRequestText}>Submit Request</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 };
@@ -521,6 +668,131 @@ const styles = StyleSheet.create({
         color: '#9ca3af',
         marginTop: 12,
     },
+
+    // Material Cards
+    materialCard: {
+        backgroundColor: '#fff',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    materialName: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#1f2937'
+    },
+    materialMeta: {
+        fontSize: 12,
+        color: '#6b7280',
+        marginBottom: 4
+    },
+    materialNotes: {
+        fontSize: 12,
+        fontStyle: 'italic',
+        color: '#374151',
+        backgroundColor: '#f9fafb',
+        padding: 6,
+        borderRadius: 4,
+        marginTop: 4
+    },
+
+    // Status Badges
+    statusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    badgePending: { backgroundColor: '#fef2f2', borderColor: '#fee2e2' },
+    badgeApproved: { backgroundColor: '#ecfdf5', borderColor: '#d1fae5' },
+    badgeRejected: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
+    badgeReceived: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },
+
+    statusBadgeText: { fontSize: 10, fontWeight: '700' },
+    textPending: { color: '#dc2626' }, // Red for pending/rejected
+    textRejected: { color: '#dc2626' },
+    textApproved: { color: '#059669' },
+    textReceived: { color: '#166534' },
+
+    markReceivedBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 10,
+        backgroundColor: '#ecfdf5',
+        padding: 8,
+        borderRadius: 8,
+        alignSelf: 'flex-start'
+    },
+    markReceivedText: {
+        fontSize: 12,
+        color: '#059669',
+        fontWeight: '600',
+        marginLeft: 4
+    },
+
+    // Modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
+    },
+    requestModalContent: {
+        width: '100%',
+        maxWidth: 400,
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 20,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5
+    },
+    requestModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20
+    },
+    requestModalTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#111827'
+    },
+    inputGroup: {
+        marginBottom: 16
+    },
+    inputLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#374151',
+        marginBottom: 6
+    },
+    inputField: {
+        backgroundColor: '#f9fafb',
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        borderRadius: 8,
+        padding: 10,
+        fontSize: 14,
+        color: '#1f2937'
+    },
+    submitRequestBtn: {
+        backgroundColor: '#8B0000',
+        paddingVertical: 12,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: 10
+    },
+    submitRequestText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16
+    }
 });
 
 export default EmployeeProjectDetailsScreen;

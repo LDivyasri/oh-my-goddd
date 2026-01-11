@@ -52,8 +52,8 @@ exports.addTaskUpdate = async (req, res) => {
                 // Add system message to task chat
                 await db.query(`
                     INSERT INTO task_messages (task_id, sender_id, type, content)
-                    VALUES (?, ?, 'system', 'Task marked as completed. Waiting for admin approval.')
-                `, [taskId, employeeId]);
+                    VALUES (?, NULL, 'system', 'Task marked as completed. Waiting for admin approval.')
+                `, [taskId]);
             }
 
             if (incompleteTasks.length === 0) {
@@ -139,6 +139,7 @@ exports.completeTask = async (req, res) => {
         const employeeId = req.user.id;
 
         // Update task status to waiting_for_approval and set progress to 100
+        console.log(`[TaskController] Completing task ${taskId} by user ${employeeId}. Sending notification...`);
         await db.query(
             'UPDATE tasks SET status = "waiting_for_approval", progress = 100, completed_by = ?, completed_at = NOW() WHERE id = ?',
             [employeeId, taskId]
@@ -149,10 +150,11 @@ exports.completeTask = async (req, res) => {
         if (taskData.length > 0) {
             const task = taskData[0];
 
-            // Notify admin (user_id = 1)
+            // Notify admin(s)
             await db.query(`
                 INSERT INTO notifications (project_id, phase_id, task_id, employee_id, type, message, is_read, created_at)
-                VALUES (?, ?, ?, 1, 'TASK_SUBMITTED', ?, 0, NOW())
+                SELECT ?, ?, ?, id, 'TASK_SUBMITTED', ?, 0, NOW()
+                FROM employees WHERE role = 'Admin' OR role = 'admin'
             `, [task.site_id, task.phase_id, taskId, `Task "${task.name}" submitted for approval`]);
 
         }
@@ -160,7 +162,8 @@ exports.completeTask = async (req, res) => {
         res.json({ message: 'Task submitted for approval' });
     } catch (error) {
         console.error('Error completing task:', error);
-        res.status(500).json({ message: 'Error completing task' });
+        require('fs').appendFileSync('error_log.txt', `[${new Date().toISOString()}] Error in completeTask: ${error.message}\n${error.stack}\n`);
+        res.status(500).json({ message: 'Error completing task', error: error.message });
     }
 };
 
@@ -197,8 +200,8 @@ exports.approveTask = async (req, res) => {
             // Add system message to chat
             await db.query(`
                 INSERT INTO task_messages (task_id, sender_id, type, content)
-                VALUES (?, ?, 'system', '✅ Good work! Task approved and completed by admin.')
-            `, [taskId, adminId]);
+                VALUES (?, NULL, 'system', '✅ Good work! Task approved and completed by admin.')
+            `, [taskId]);
         }
 
         res.json({ message: 'Task approved' });
@@ -220,10 +223,10 @@ exports.rejectTask = async (req, res) => {
             return res.status(403).json({ message: 'Only admin can reject tasks' });
         }
 
-        // Update status back to in_progress and reset progress to 99% to allow resubmission
-        // Clear completed_by and completed_at
+        // Update status back to change_required and reset progress (e.g. keep high or reset? User said "Mark as Completed button becomes active again")
+        // We'll set it to 'change_required'.
         await db.query(
-            'UPDATE tasks SET status = "in_progress", progress = 99, completed_by = NULL, completed_at = NULL WHERE id = ?',
+            'UPDATE tasks SET status = "change_required", progress = 99, completed_by = NULL, completed_at = NULL WHERE id = ?',
             [taskId]
         );
 
@@ -243,8 +246,8 @@ exports.rejectTask = async (req, res) => {
             // Add system message to chat
             await db.query(`
                 INSERT INTO task_messages (task_id, sender_id, type, content)
-                VALUES (?, ?, 'system', ?)
-            `, [taskId, adminId, reason ? `Changes requested: ${reason}` : 'Changes requested by Admin.']);
+                VALUES (?, NULL, 'system', ?)
+            `, [taskId, reason ? `Changes requested: ${reason}` : 'Changes requested by Admin.']);
         }
 
         res.json({ message: 'Changes requested' });

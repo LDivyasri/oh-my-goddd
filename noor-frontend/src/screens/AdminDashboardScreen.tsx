@@ -1,10 +1,12 @@
-import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, SafeAreaView, StyleSheet, StatusBar, TextInput, FlatList, Modal, Alert, Platform, useWindowDimensions } from 'react-native';
+import React, { useContext, useState, useEffect, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, SafeAreaView, StyleSheet, StatusBar, TextInput, FlatList, Modal, Alert, Platform, useWindowDimensions, Image, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import StageProgressScreen from './StageProgressScreen';
+
+declare const window: any;
 
 // Dummy Data for Projects Project List
 const PROJECTS = [
@@ -139,6 +141,7 @@ const AdminDashboardScreen = () => {
     const { width } = useWindowDimensions();
     const isMobile = width < 768;
     const [activeTab, setActiveTab] = useState('Dashboard');
+    const [activeProjectTab, setActiveProjectTab] = useState<'Tasks' | 'Transactions' | 'Materials' | 'Files'>('Tasks');
     const [expandedPhaseIds, setExpandedPhaseIds] = useState<number[]>([]);
 
     const togglePhase = (phaseId: number) => {
@@ -228,6 +231,7 @@ const AdminDashboardScreen = () => {
 
     // Project Modal State (List)
     const [projectModalVisible, setProjectModalVisible] = useState(false);
+
     const [sites, setSites] = useState<any[]>([]);
     const [selectedSite, setSelectedSite] = useState<any>(null);
     const [loading, setLoading] = useState(false);
@@ -236,6 +240,84 @@ const AdminDashboardScreen = () => {
     const [employees, setEmployees] = useState<any[]>([]);
     const [sitePickerVisible, setSitePickerVisible] = useState(false);
     const [settingsPhases, setSettingsPhases] = useState<any[]>([]);
+
+    // Material Requests State (Admin)
+    const [materialRequests, setMaterialRequests] = useState<any[]>([]);
+    const [projectMaterials, setProjectMaterials] = useState<any[]>([]); // To store materials for specific project logic
+
+    // Fetch all materials for admin
+    const fetchAdminMaterials = async () => {
+        setLoading(true);
+        try {
+            const response = await api.get('/materials');
+            setMaterialRequests(response.data.requests || []);
+        } catch (error) {
+            console.error('Error fetching admin materials:', error);
+            showToast('Failed to fetch material requests', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchProjectMaterials = useCallback(async (siteId: number) => {
+        try {
+            const response = await api.get(`/sites/${siteId}/materials`);
+            setProjectMaterials(response.data.requests || []);
+        } catch (error) {
+            console.error('Error fetching project materials:', error);
+        }
+    }, []);
+
+    const selectedSiteId = selectedSite?.id;
+
+    // Effect to fetch project materials when tab changes
+    useEffect(() => {
+        if (activeProjectTab === 'Materials' && selectedSiteId) {
+            fetchProjectMaterials(selectedSiteId);
+        }
+    }, [activeProjectTab, selectedSiteId, fetchProjectMaterials]);
+
+    // Files State
+    const [projectFiles, setProjectFiles] = useState<any[]>([]);
+    const [activeFileTab, setActiveFileTab] = useState<'Media' | 'Voice' | 'Documents' | 'Links'>('Media');
+    const [fileLoading, setFileLoading] = useState(false);
+
+    const fetchProjectFiles = useCallback(async (siteId: number) => {
+        setFileLoading(true);
+        try {
+            const response = await api.get(`/sites/${siteId}/files`);
+            setProjectFiles(response.data.files || []);
+        } catch (error) {
+            console.error('Error fetching project files:', error);
+        } finally {
+            setFileLoading(false);
+        }
+    }, []);
+
+    // Effect for Files
+    useEffect(() => {
+        if (activeProjectTab === 'Files' && selectedSiteId) {
+            fetchProjectFiles(selectedSiteId);
+        }
+    }, [activeProjectTab, selectedSiteId, fetchProjectFiles]);
+
+    const handleUpdateMaterialStatus = async (id: number, status: 'Approved' | 'Rejected') => {
+        try {
+            await api.put(`/materials/${id}/status`, { status });
+            showToast(`Material request ${status}`, 'success');
+            fetchAdminMaterials(); // Refresh list
+        } catch (error) {
+            console.error('Error updating material status:', error);
+            showToast('Failed to update status', 'error');
+        }
+    };
+
+    // Auto-fetch when tab is Materials
+    useEffect(() => {
+        if (activeTab === 'Materials') {
+            fetchAdminMaterials();
+        }
+    }, [activeTab]);
 
     // Project Detail Data
     const [projectPhases, setProjectPhases] = useState<any[]>([]);
@@ -413,7 +495,7 @@ const AdminDashboardScreen = () => {
 
     const handleDeletePhase = async (phaseId: number, phaseName: string) => {
         const confirmDelete = Platform.OS === 'web'
-            ? window.confirm(`Are you sure you want to delete the "${phaseName}" stage? This will also delete all tasks inside it.`)
+            ? (window as any).confirm(`Are you sure you want to delete the "${phaseName}" stage? This will also delete all tasks inside it.`)
             : await new Promise(resolve => {
                 Alert.alert(
                     "Delete Stage",
@@ -447,7 +529,7 @@ const AdminDashboardScreen = () => {
 
     const handleDeleteTask = async (taskId: number, taskName: string) => {
         const confirmDelete = Platform.OS === 'web'
-            ? window.confirm(`Are you sure you want to delete "${taskName}"?`)
+            ? (window as any).confirm(`Are you sure you want to delete "${taskName}"?`)
             : await new Promise(resolve => {
                 Alert.alert(
                     "Delete Task",
@@ -536,7 +618,7 @@ const AdminDashboardScreen = () => {
     };
 
     // Project Details Tabs
-    const [activeProjectTab, setActiveProjectTab] = useState<'Tasks' | 'Transactions' | 'Materials' | 'Files'>('Tasks');
+
     const TABS = ['Tasks', 'Transactions', 'Materials', 'Files'];
 
     // Create Project Modal State
@@ -672,7 +754,7 @@ const AdminDashboardScreen = () => {
 
     const submitCreateProject = async (shouldClose = true) => {
         if (!formData.name || !formData.address) {
-            alert('Please fill in required fields');
+            Alert.alert('Required', 'Please fill in required fields');
             return;
         }
 
@@ -783,28 +865,30 @@ const AdminDashboardScreen = () => {
     };
 
     const handleDeleteEmployee = async (id: number, name: string) => {
-        const confirmDelete = Platform.OS === 'web'
-            ? window.confirm(`Are you sure you want to delete employee "${name}"?`)
-            : await new Promise(resolve => {
-                Alert.alert(
-                    "Delete Employee",
-                    `Are you sure you want to delete "${name}"?`,
-                    [
-                        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-                        { text: "Delete", style: "destructive", onPress: () => resolve(true) }
-                    ]
-                );
-            });
+        const performDelete = async () => {
+            try {
+                await api.delete(`/employees/${id}`);
+                showToast('Employee deleted successfully', 'success');
+                fetchEmployees();
+            } catch (error: any) {
+                console.error('Error deleting employee:', error);
+                showToast('Failed to delete employee', 'error');
+            }
+        };
 
-        if (!confirmDelete) return;
-
-        try {
-            await api.delete(`/employees/${id}`);
-            showToast('Employee deleted successfully', 'success');
-            fetchEmployees();
-        } catch (error: any) {
-            console.error('Error deleting employee:', error);
-            showToast('Failed to delete employee', 'error');
+        if (Platform.OS === 'web') {
+            if ((window as any).confirm(`Are you sure you want to delete employee "${name}"?`)) {
+                performDelete();
+            }
+        } else {
+            Alert.alert(
+                "Delete Employee",
+                `Are you sure you want to delete "${name}"?`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Delete", style: "destructive", onPress: performDelete }
+                ]
+            );
         }
     };
 
@@ -898,7 +982,7 @@ const AdminDashboardScreen = () => {
         };
 
         if (Platform.OS === 'web') {
-            if (window.confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
+            if ((window as any).confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
                 handleDelete();
             }
         } else {
@@ -1296,9 +1380,20 @@ const AdminDashboardScreen = () => {
                                 onPress={() => showToast('Reports feature coming soon')}
                             />
                             <StatusBox
-                                label="Expenses"
-                                icon="cash-outline"
-                                onPress={() => showToast('Expenses feature coming soon')}
+                                label="Materials"
+                                icon="cube-outline"
+                                onPress={() => {
+                                    setProjectModalVisible(true);
+                                    setActiveProjectTab('Materials');
+                                    // Optionally select a default project if needed or show a global view later. 
+                                    // For now this will just open the project modal which defaults to first project if we don't set one?
+                                    // Actually the project modal requires a selectedSite.
+                                    // Let's create a dedicated global modal for materials or re-use existing flow.
+                                    // Given requirements, "Admin Dashboard -> Materials Section".
+                                    // Let's scroll to a Materials section on the main dashboard instead? Or overlay.
+                                    // For now, let's just make it a filter or scroll target.
+                                    setActiveTab('Materials'); // Switching main tab to Materials
+                                }}
                             />
                         </View>
 
@@ -1364,6 +1459,70 @@ const AdminDashboardScreen = () => {
                                 </View>
                             }
                             contentContainerStyle={{ paddingBottom: 20 }}
+                        />
+                    </View>
+                )}
+
+
+
+                {activeTab === 'Materials' && (
+                    <View style={{ flex: 1, padding: 20 }}>
+                        <Text style={{ fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 20 }}>All Material Requests</Text>
+                        <FlatList
+                            data={materialRequests}
+                            keyExtractor={(item) => item.id.toString()}
+                            refreshing={loading}
+                            onRefresh={fetchAdminMaterials}
+                            renderItem={({ item }) => (
+                                <View style={styles.adminMaterialCard}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                        <Text style={styles.adminMaterialProject}>{item.site_name}</Text>
+                                        <View style={[styles.adminMaterialStatusBadge,
+                                        item.status === 'Approved' ? styles.badgeApproved :
+                                            item.status === 'Rejected' ? styles.badgeRejected :
+                                                item.status === 'Received' ? styles.badgeReceived : styles.badgePending
+                                        ]}>
+                                            <Text style={[styles.statusBadgeText,
+                                            item.status === 'Approved' ? styles.textApproved :
+                                                item.status === 'Rejected' ? styles.textRejected :
+                                                    item.status === 'Received' ? styles.textReceived : styles.textPending
+                                            ]}>{item.status}</Text>
+                                        </View>
+                                    </View>
+                                    <Text style={styles.adminMaterialName}>{item.quantity} {item.material_name}</Text>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                                        <Text style={styles.adminMaterialMeta}>By: {item.requested_by}</Text>
+                                        <Text style={styles.adminMaterialMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                                    </View>
+
+                                    {item.status === 'Received' && (
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: '#f0fdf4', padding: 6, borderRadius: 4, alignSelf: 'flex-start' }}>
+                                            <Ionicons name="checkbox" size={14} color="#166534" />
+                                            <Text style={{ marginLeft: 4, color: '#166534', fontSize: 12, fontWeight: '600' }}>Item Received</Text>
+                                        </View>
+                                    )}
+
+                                    {item.status === 'Pending' && (
+                                        <View style={{ flexDirection: 'row', marginTop: 12, gap: 10 }}>
+                                            <TouchableOpacity
+                                                style={[styles.actionBtn, styles.btnApprove]}
+                                                onPress={() => handleUpdateMaterialStatus(item.id, 'Approved')}
+                                            >
+                                                <Ionicons name="checkmark" size={16} color="#065f46" />
+                                                <Text style={[styles.actionBtnText, { color: '#065f46' }]}>Approve</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.actionBtn, styles.btnReject]}
+                                                onPress={() => handleUpdateMaterialStatus(item.id, 'Rejected')}
+                                            >
+                                                <Ionicons name="close" size={16} color="#991b1b" />
+                                                <Text style={[styles.actionBtnText, { color: '#991b1b' }]}>Reject</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                </View>
+                            )}
+                            ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: '#6b7280' }}>No requests found.</Text>}
                         />
                     </View>
                 )}
@@ -1622,16 +1781,87 @@ const AdminDashboardScreen = () => {
                             activeProjectTab === 'Materials' && (
                                 <View style={styles.tabContentContainer}>
                                     <View style={styles.sectionHeaderRow}>
-                                        <Text style={styles.tabSectionTitle}>Materials</Text>
-                                        <TouchableOpacity style={styles.addButtonSmall}>
+                                        <Text style={styles.tabSectionTitle}>Material Requests</Text>
+                                        <TouchableOpacity
+                                            style={styles.addButtonSmall}
+                                            onPress={() => {
+                                                // Could open a modal to add material request on behalf of site
+                                                Alert.alert('Info', 'Admins can utilize the employee view to request materials.');
+                                            }}
+                                        >
                                             <Ionicons name="add" size={18} color="#fff" />
-                                            <Text style={styles.addButtonTextSmall}>Add</Text>
+                                            <Text style={styles.addButtonTextSmall}>Add Request</Text>
                                         </TouchableOpacity>
                                     </View>
-                                    <View style={styles.emptyTabState}>
-                                        <Ionicons name="cube-outline" size={48} color="#e5e7eb" />
-                                        <Text style={styles.emptyTabText}>No materials tracked</Text>
-                                    </View>
+
+                                    {projectMaterials.length > 0 ? (
+                                        <FlatList
+                                            data={projectMaterials}
+                                            keyExtractor={(item) => item.id.toString()}
+                                            renderItem={({ item }) => (
+                                                <View style={styles.adminMaterialCard}>
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                                        <Text style={styles.adminMaterialName}>{item.material_name}</Text>
+                                                        <View style={[styles.adminMaterialStatusBadge,
+                                                        item.status === 'Approved' ? styles.badgeApproved :
+                                                            item.status === 'Rejected' ? styles.badgeRejected :
+                                                                item.status === 'Received' ? styles.badgeReceived : styles.badgePending
+                                                        ]}>
+                                                            <Text style={[styles.statusBadgeText,
+                                                            item.status === 'Approved' ? styles.textApproved :
+                                                                item.status === 'Rejected' ? styles.textRejected :
+                                                                    item.status === 'Received' ? styles.textReceived : styles.textPending
+                                                            ]}>{item.status}</Text>
+                                                        </View>
+                                                    </View>
+
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                                                        <Text style={styles.adminMaterialMeta}>Qty: {item.quantity}</Text>
+                                                        <Text style={styles.adminMaterialMeta}>Req By: {employees.find(e => e.id === item.employee_id)?.name || 'Employee'}</Text>
+                                                    </View>
+                                                    <Text style={[styles.adminMaterialMeta, { marginTop: 2 }]}>{new Date(item.created_at).toLocaleDateString()}</Text>
+
+                                                    {item.status === 'Received' && (
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: '#f0fdf4', padding: 6, borderRadius: 4, alignSelf: 'flex-start' }}>
+                                                            <Ionicons name="checkbox" size={14} color="#166534" />
+                                                            <Text style={{ marginLeft: 4, color: '#166534', fontSize: 12, fontWeight: '600' }}>Item Received</Text>
+                                                        </View>
+                                                    )}
+
+                                                    {item.status === 'Pending' && (
+                                                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                                                            <TouchableOpacity
+                                                                style={[styles.actionBtn, styles.btnApprove]}
+                                                                onPress={async () => {
+                                                                    await handleUpdateMaterialStatus(item.id, 'Approved');
+                                                                    fetchProjectMaterials(selectedSite.id); // Refresh local list
+                                                                }}
+                                                            >
+                                                                <Ionicons name="checkmark-circle" size={16} color="#059669" />
+                                                                <Text style={[styles.actionBtnText, { color: '#059669' }]}>Approve</Text>
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity
+                                                                style={[styles.actionBtn, styles.btnReject]}
+                                                                onPress={async () => {
+                                                                    await handleUpdateMaterialStatus(item.id, 'Rejected');
+                                                                    fetchProjectMaterials(selectedSite.id); // Refresh local list
+                                                                }}
+                                                            >
+                                                                <Ionicons name="close-circle" size={16} color="#ef4444" />
+                                                                <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>Reject</Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    )}
+                                                </View>
+                                            )}
+                                            scrollEnabled={false} // List is inside a ScrollView already
+                                        />
+                                    ) : (
+                                        <View style={styles.emptyTabState}>
+                                            <Ionicons name="cube-outline" size={48} color="#e5e7eb" />
+                                            <Text style={styles.emptyTabText}>No material requests found for this project.</Text>
+                                        </View>
+                                    )}
                                 </View>
                             )
                         }
@@ -1641,15 +1871,159 @@ const AdminDashboardScreen = () => {
                                 <View style={styles.tabContentContainer}>
                                     <View style={styles.sectionHeaderRow}>
                                         <Text style={styles.tabSectionTitle}>Project Files</Text>
-                                        <TouchableOpacity style={styles.addButtonSmall}>
+                                        <TouchableOpacity
+                                            style={styles.addButtonSmall}
+                                            onPress={() => Alert.alert('Upload', 'Upload feature coming soon')}
+                                        >
                                             <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
                                             <Text style={styles.addButtonTextSmall}>Upload</Text>
                                         </TouchableOpacity>
                                     </View>
-                                    <View style={styles.emptyTabState}>
-                                        <Ionicons name="document-text-outline" size={48} color="#e5e7eb" />
-                                        <Text style={styles.emptyTabText}>No files uploaded</Text>
+
+                                    {/* File Type Tabs */}
+                                    <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
+                                        {['Media', 'Voice', 'Documents', 'Links'].map(tab => (
+                                            <TouchableOpacity
+                                                key={tab}
+                                                style={{
+                                                    flex: 1,
+                                                    paddingVertical: 8,
+                                                    alignItems: 'center',
+                                                    borderRadius: 6,
+                                                    backgroundColor: activeFileTab === tab ? '#fff' : 'transparent',
+                                                    shadowColor: activeFileTab === tab ? '#000' : 'transparent',
+                                                    shadowOffset: { width: 0, height: 1 },
+                                                    shadowOpacity: activeFileTab === tab ? 0.05 : 0,
+                                                    shadowRadius: 2,
+                                                    elevation: activeFileTab === tab ? 2 : 0
+                                                }}
+                                                onPress={() => setActiveFileTab(tab as any)}
+                                            >
+                                                <Text style={{
+                                                    fontWeight: '600',
+                                                    color: activeFileTab === tab ? '#8B0000' : '#6b7280',
+                                                    fontSize: 13
+                                                }}>{tab}</Text>
+                                            </TouchableOpacity>
+                                        ))}
                                     </View>
+
+                                    {fileLoading ? (
+                                        <View style={{ padding: 40, alignItems: 'center' }}>
+                                            <ActivityIndicator size="large" color="#8B0000" />
+                                            <Text style={{ marginTop: 10, color: '#6b7280' }}>Loading files...</Text>
+                                        </View>
+                                    ) : (
+                                        (() => {
+                                            const filtered = projectFiles.filter(f => {
+                                                if (activeFileTab === 'Media') return f.type === 'image' || f.type === 'video';
+                                                if (activeFileTab === 'Voice') return f.type === 'audio';
+                                                if (activeFileTab === 'Documents') return f.type === 'document' || f.type === 'pdf'; // Handle pdf if type is specific
+                                                if (activeFileTab === 'Links') return f.type === 'link';
+                                                return false;
+                                            });
+
+                                            if (filtered.length === 0) {
+                                                return (
+                                                    <View style={styles.emptyTabState}>
+                                                        <Ionicons
+                                                            name={activeFileTab === 'Voice' ? 'mic-outline' : activeFileTab === 'Documents' ? 'document-text-outline' : activeFileTab === 'Links' ? 'link-outline' : 'images-outline'}
+                                                            size={48}
+                                                            color="#e5e7eb"
+                                                        />
+                                                        <Text style={styles.emptyTabText}>No {activeFileTab.toLowerCase()} found</Text>
+                                                    </View>
+                                                );
+                                            }
+
+                                            // Grouping Logic
+                                            const groups: { [key: string]: any[] } = {};
+                                            filtered.forEach(f => {
+                                                const d = new Date(f.created_at);
+                                                const today = new Date();
+                                                const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+
+                                                let key = d.toLocaleDateString();
+                                                if (d.toDateString() === today.toDateString()) key = 'Today';
+                                                if (d.toDateString() === yesterday.toDateString()) key = 'Yesterday';
+
+                                                if (!groups[key]) groups[key] = [];
+                                                groups[key].push(f);
+                                            });
+
+                                            return (
+                                                <View>
+                                                    {Object.keys(groups).map(dateKey => (
+                                                        <View key={dateKey} style={{ marginBottom: 20 }}>
+                                                            <Text style={{ fontSize: 13, fontWeight: '600', color: '#6b7280', marginBottom: 10, marginLeft: 4 }}>{dateKey.toUpperCase()}</Text>
+                                                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                                                                {groups[dateKey].map(file => (
+                                                                    <TouchableOpacity
+                                                                        key={file.id}
+                                                                        style={{
+                                                                            width: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? '100%' : '31%',
+                                                                            aspectRatio: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? undefined : 1,
+                                                                            height: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 60 : undefined,
+                                                                            backgroundColor: '#f9fafb',
+                                                                            borderRadius: 8,
+                                                                            borderWidth: 1,
+                                                                            borderColor: '#e5e7eb',
+                                                                            overflow: 'hidden',
+                                                                            flexDirection: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 'row' : 'column',
+                                                                            alignItems: 'center',
+                                                                            padding: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 10 : 0
+                                                                        }}
+                                                                    >
+                                                                        {file.type === 'image' ? (
+                                                                            <Image
+                                                                                source={{ uri: file.url.startsWith('http') ? file.url : `http://localhost:5000${file.url}` }}
+                                                                                style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
+                                                                            />
+                                                                        ) : (
+                                                                            <View style={{
+                                                                                width: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 40 : '100%',
+                                                                                height: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 40 : '70%',
+                                                                                alignItems: 'center',
+                                                                                justifyContent: 'center',
+                                                                                backgroundColor: activeFileTab === 'Voice' ? '#fee2e2' : '#f3f4f6',
+                                                                                borderRadius: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 20 : 0
+                                                                            }}>
+                                                                                <Ionicons
+                                                                                    name={file.type === 'video' ? 'videocam' : file.type === 'audio' ? 'mic' : 'document-text'}
+                                                                                    size={activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 20 : 32}
+                                                                                    color={activeFileTab === 'Voice' ? '#dc2626' : '#9ca3af'}
+                                                                                />
+                                                                            </View>
+                                                                        )}
+
+                                                                        {/* Details View */}
+                                                                        <View style={{
+                                                                            padding: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 0 : 4,
+                                                                            marginLeft: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 10 : 0,
+                                                                            flex: 1,
+                                                                            justifyContent: 'center',
+                                                                            width: '100%'
+                                                                        }}>
+                                                                            <Text numberOfLines={1} style={{ fontSize: 12, fontWeight: '500', color: '#111827', textAlign: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 'left' : 'center' }}>
+                                                                                {file.task_name || 'Project File'}
+                                                                            </Text>
+                                                                            <Text numberOfLines={1} style={{ fontSize: 10, color: '#6b7280', textAlign: activeFileTab === 'Voice' || activeFileTab === 'Documents' ? 'left' : 'center' }}>
+                                                                                {file.uploaded_by || 'Unknown'} • {new Date(file.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                            </Text>
+                                                                        </View>
+
+                                                                        {(activeFileTab === 'Voice' || activeFileTab === 'Documents') && (
+                                                                            <Ionicons name="download-outline" size={20} color="#6b7280" style={{ marginRight: 5 }} />
+                                                                        )}
+                                                                    </TouchableOpacity>
+                                                                ))}
+                                                            </View>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            );
+                                        })()
+                                    )}
                                 </View>
                             )
                         }
@@ -1821,18 +2195,18 @@ const AdminDashboardScreen = () => {
                                     {user?.role === 'admin' ? (
                                         <>
                                             <Text style={styles.fieldLabel}>Assigned Employee</Text>
-                                            <View style={styles.pickerContainer}>
-                                                <select
-                                                    style={styles.htmlSelect}
-                                                    value={selectedTask.employee_id || ''}
-                                                    onChange={(e) => setSelectedTask({ ...selectedTask, employee_id: e.target.value })}
-                                                >
-                                                    <option value="">Unassigned</option>
-                                                    {employees.map(emp => (
-                                                        <option key={emp.id} value={emp.id}>{emp.name}</option>
-                                                    ))}
-                                                </select>
-                                            </View>
+                                            <TouchableOpacity
+                                                style={styles.pickerSelector}
+                                                onPress={() => setAssignmentPickerVisible(true)}
+                                            >
+                                                <Text style={{ color: selectedTask.employee_id ? '#000' : '#9ca3af' }}>
+                                                    {selectedTask.employee_id
+                                                        ? employees.find(e => e.id == selectedTask.employee_id)?.name || 'Unknown'
+                                                        : 'Unassigned'
+                                                    }
+                                                </Text>
+                                                <Ionicons name="chevron-down" size={20} color="#6b7280" />
+                                            </TouchableOpacity>
 
                                             <View style={styles.modalRow}>
                                                 <View style={{ flex: 1, marginRight: 8 }}>
@@ -1919,6 +2293,56 @@ const AdminDashboardScreen = () => {
                         </View>
                     </View>
                 </View>
+
+                {/* Single Selection Assignment Picker for Task Modal (Simplified) */}
+                <Modal
+                    visible={assignmentPickerVisible}
+                    transparent={true}
+                    animationType="fade"
+                    onRequestClose={() => setAssignmentPickerVisible(false)}
+                >
+                    <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+                        activeOpacity={1}
+                        onPress={() => setAssignmentPickerVisible(false)}
+                    >
+                        <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20, width: '80%', maxHeight: '60%' }}>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 16 }}>Select Employee</Text>
+                            <ScrollView>
+                                <TouchableOpacity
+                                    style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', flexDirection: 'row', alignItems: 'center' }}
+                                    onPress={() => {
+                                        setSelectedTask({ ...selectedTask, employee_id: null });
+                                        setAssignmentPickerVisible(false);
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 16, color: '#6b7280', fontStyle: 'italic' }}>Unassigned</Text>
+                                </TouchableOpacity>
+                                {employees.filter(e => e.status === 'Active').map(emp => (
+                                    <TouchableOpacity
+                                        key={emp.id}
+                                        style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', flexDirection: 'row', alignItems: 'center' }}
+                                        onPress={() => {
+                                            setSelectedTask({
+                                                ...selectedTask,
+                                                employee_id: emp.id
+                                            });
+                                            setAssignmentPickerVisible(false);
+                                        }}
+                                    >
+                                        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#E0E7FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                            <Text style={{ color: '#3730A3', fontWeight: 'bold' }}>{emp.name.charAt(0)}</Text>
+                                        </View>
+                                        <View>
+                                            <Text style={{ fontSize: 16, color: '#111827' }}>{emp.name}</Text>
+                                            <Text style={{ fontSize: 12, color: '#6b7280' }}>{emp.role}</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
             </Modal>
 
 
@@ -1946,6 +2370,18 @@ const AdminDashboardScreen = () => {
                         color={activeTab === 'Workers' ? '#8B0000' : '#9ca3af'}
                     />
                     <Text style={[styles.newNavText, activeTab === 'Workers' && styles.newNavTextActive]}>Workers</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.newNavItem}
+                    onPress={() => setActiveTab('Materials')}
+                >
+                    <Ionicons
+                        name="cube-outline"
+                        size={22}
+                        color={activeTab === 'Materials' ? '#8B0000' : '#9ca3af'}
+                    />
+                    <Text style={[styles.newNavText, activeTab === 'Materials' && styles.newNavTextActive]}>Materials</Text>
                 </TouchableOpacity>
             </View >
 
@@ -2746,14 +3182,18 @@ const AdminDashboardScreen = () => {
                                     };
 
                                     if (Platform.OS === 'web') {
-                                        if (window.confirm(`Are you sure you want to delete stage "${selectedStageOption.name}"?`)) {
+                                        if ((window as any).confirm(`Are you sure you want to delete stage "${selectedStageOption.name}"?`)) {
                                             handleDeleteStage();
                                         }
                                     } else {
-                                        Alert.alert('Delete Stage', `Are you sure you want to delete stage "${selectedStageOption.name}"?`, [
-                                            { text: 'Cancel', style: 'cancel' },
-                                            { text: 'Delete', style: 'destructive', onPress: handleDeleteStage }
-                                        ]);
+                                        Alert.alert(
+                                            'Delete Stage',
+                                            `Are you sure you want to delete stage "${selectedStageOption.name}"?`,
+                                            [
+                                                { text: 'Cancel', style: 'cancel' },
+                                                { text: 'Delete', style: 'destructive', onPress: handleDeleteStage }
+                                            ]
+                                        );
                                     }
                                 }
                             }}
@@ -4420,6 +4860,82 @@ const styles = StyleSheet.create({
         color: '#9ca3af',
         fontStyle: 'italic',
         marginBottom: 12,
+    },
+
+    // Admin Materials Styles
+    adminMaterialCard: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    adminMaterialProject: {
+        fontSize: 12,
+        color: '#6b7280',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        marginBottom: 4
+    },
+    adminMaterialName: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 4
+    },
+    adminMaterialMeta: {
+        fontSize: 13,
+        color: '#4b5563'
+    },
+    adminMaterialStatusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 12,
+        borderWidth: 1,
+        alignSelf: 'flex-start'
+    },
+    badgePending: { backgroundColor: '#fef2f2', borderColor: '#fee2e2' },
+    badgeApproved: { backgroundColor: '#ecfdf5', borderColor: '#d1fae5' },
+    badgeRejected: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
+    badgeReceived: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },
+
+    statusBadgeText: { fontSize: 10, fontWeight: '700' },
+    textPending: { color: '#dc2626' },
+    textRejected: { color: '#dc2626' },
+    textApproved: { color: '#059669' },
+    textReceived: { color: '#166534' },
+
+    actionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+    },
+    btnApprove: {
+        backgroundColor: '#ecfdf5',
+        borderColor: '#059669',
+    },
+    btnReject: {
+        backgroundColor: '#fef2f2',
+        borderColor: '#ef4444',
+    },
+    actionBtnText: {
+        fontSize: 12,
+        fontWeight: '700',
+        marginLeft: 4
+    },
+    pickerSelector: {
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        borderRadius: 8,
+        padding: 12,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16
     },
     addTaskBtn: {
         flexDirection: 'row',

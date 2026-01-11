@@ -13,6 +13,7 @@ router.post('/upload', verifyToken, uploadController.uploadMiddleware, uploadCon
 router.get('/sites', verifyToken, siteController.getAllSites);
 router.post('/sites', verifyToken, siteController.createSite);
 router.get('/sites/:id', verifyToken, siteController.getSiteWithPhases);
+router.get('/sites/:siteId/files', verifyToken, siteController.getSiteFiles); // New Files Route
 router.put('/sites/:id', verifyToken, siteController.updateSite);
 router.delete('/sites/:id', verifyToken, siteController.deleteSite);
 
@@ -69,5 +70,13 @@ router.post('/phases/:id/messages', verifyToken, siteController.sendPhaseMessage
 // Notifications
 router.get('/notifications', verifyToken, siteController.getNotifications);
 router.put('/notifications/:id/read', verifyToken, siteController.markNotificationRead);
+
+// Material Routes
+const materialController = require('../controllers/materialController');
+router.post('/materials', verifyToken, materialController.createMaterialRequest); // Create
+router.get('/sites/:siteId/materials', verifyToken, materialController.getMaterialRequests); // Get for site
+router.get('/materials', verifyToken, materialController.getAllMaterialRequests); // Get all (Admin)
+router.put('/materials/:id/status', verifyToken, materialController.updateMaterialRequestStatus); // Approve/Reject
+router.put('/materials/:id/received', verifyToken, materialController.markMaterialReceived); // Mark Received
 
 module.exports = router;

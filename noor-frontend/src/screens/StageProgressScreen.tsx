@@ -818,17 +818,18 @@ const StageProgressScreen = ({ route, navigation }: any) => {
 
 
     const getStatusColor = (status: string) => {
-        if (status === 'Completed' || status === 'achieved') return '#10B981'; // Green
+        if (status === 'Completed' || status === 'achieved' || status === 'Approved') return '#10B981'; // Green
         if (status === 'waiting_for_approval') return '#F59E0B'; // Yellow
-        if (status === 'delayed') return '#EF4444'; // Red
+        if (status === 'delayed' || status === 'change_required') return '#EF4444'; // Red
         if (status === 'Not Started' || status === 'not_started' || status === 'pending') return '#9CA3AF'; // Gray
         return '#3B82F6'; // Blue (In Progress)
     };
 
     const displayStatus = (status: string) => {
         if (status === 'waiting_for_approval') return 'Waiting for Approval';
-        if (status === 'Completed') return 'Completed';
+        if (status === 'Completed' || status === 'Approved') return 'Completed';
         if (status === 'achieved') return 'Completed';
+        if (status === 'change_required') return 'Change Required';
         if (status === 'Not Started' || status === 'not_started' || status === 'pending') return 'Not Started';
         return status?.replace('_', ' ') || 'In Progress';
     };
@@ -942,61 +943,94 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                 </TouchableOpacity>
                 <Text style={styles.headerTitle} numberOfLines={1}>{phase?.name || 'Stage Progress'}</Text>
 
-                {/* Admin Approval Actions */}
-                {isAdmin && phase?.status === 'waiting_for_approval' ? (
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <TouchableOpacity
-                            style={{ backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
-                            onPress={handleApprove}
-                        >
-                            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>✓ Approve</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={{ backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
-                            onPress={handleReject}
-                        >
-                            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>✗ Changes</Text>
-                        </TouchableOpacity>
-                    </View>
-                ) : !isAdmin && phase?.status !== 'Completed' && phase?.status !== 'waiting_for_approval' ? (
-                    <TouchableOpacity
-                        style={{
-                            backgroundColor: submitLoading ? '#9CA3AF' : '#8B0000',
-                            paddingHorizontal: 12,
-                            paddingVertical: 6,
-                            borderRadius: 20,
-                            opacity: submitLoading ? 0.6 : 1
-                        }}
-                        onPress={handleMarkComplete}
-                        disabled={submitLoading}
-                    >
-                        <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>
-                            {submitLoading ? 'Submitting...' : 'Mark Complete'}
-                        </Text>
-                    </TouchableOpacity>
-                ) : !isAdmin && phase?.status === 'waiting_for_approval' ? (
-                    <View style={{
-                        backgroundColor: '#FEF3C7',
-                        paddingHorizontal: 12,
-                        paddingVertical: 6,
-                        borderRadius: 20,
-                        borderWidth: 1,
-                        borderColor: '#F59E0B'
-                    }}>
-                        <Text style={{ color: '#92400E', fontWeight: '700', fontSize: 12 }}>
-                            ⏳ Waiting for Approval
-                        </Text>
-                    </View>
-                ) : (
-                    <View style={{ flexDirection: 'row', gap: 12 }}>
-                        <TouchableOpacity>
-                            <Ionicons name="notifications-outline" size={24} color="#374151" />
-                        </TouchableOpacity>
-                        <TouchableOpacity>
-                            <Ionicons name="ellipsis-vertical" size={24} color="#374151" />
-                        </TouchableOpacity>
-                    </View>
-                )}
+                {/* HEADER ACTION BUTTONS */}
+                {
+                    // 1. ADMIN ACTIONS (Only when waiting for approval)
+                    isAdmin && phase?.status === 'waiting_for_approval' ? (
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity
+                                style={{ backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                                onPress={handleApprove}
+                            >
+                                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>✓ Approve</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={{ backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}
+                                onPress={handleReject}
+                            >
+                                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>✗ Changes</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) :
+                        // 2. EMPLOYEE: APPROVED STATE (Disabled & Light Color)
+                        (!isAdmin && (phase?.status === 'Completed' || phase?.status === 'completed' || phase?.status === 'Approved')) ? (
+                            <TouchableOpacity
+                                disabled={true}
+                                style={{
+                                    backgroundColor: '#D1FAE5', // Very light green
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 20,
+                                    borderWidth: 1,
+                                    borderColor: '#10B981',
+                                    opacity: 0.7
+                                }}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Ionicons name="checkmark-circle" size={14} color="#059669" />
+                                    <Text style={{ color: '#059669', fontWeight: '700', fontSize: 12 }}>Approved</Text>
+                                </View>
+                            </TouchableOpacity>
+                        ) :
+                            // 3. EMPLOYEE: WAITING FOR APPROVAL (Disabled & Light Gray)
+                            (!isAdmin && phase?.status === 'waiting_for_approval') ? (
+                                <TouchableOpacity
+                                    disabled={true}
+                                    style={{
+                                        backgroundColor: '#F3F4F6', // Light Gray
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 6,
+                                        borderRadius: 20,
+                                        borderWidth: 1,
+                                        borderColor: '#D1D5DB'
+                                    }}
+                                >
+                                    <Text style={{ color: '#6B7280', fontWeight: '700', fontSize: 12 }}>
+                                        Waiting for Approval
+                                    </Text>
+                                </TouchableOpacity>
+                            ) :
+                                // 4. EMPLOYEE: ACTIVE STATE (In Progress / Change Required / Not Started)
+                                (!isAdmin) ? (
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: submitLoading ? '#9CA3AF' : '#8B0000',
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 6,
+                                            borderRadius: 20,
+                                            opacity: submitLoading ? 0.6 : 1
+                                        }}
+                                        onPress={handleMarkComplete}
+                                        disabled={submitLoading}
+                                    >
+                                        <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>
+                                            {submitLoading ? 'Submitting...' : 'Mark Complete'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ) :
+                                    // 5. Default Admin View (Ellipsis)
+                                    (
+                                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                                            <TouchableOpacity>
+                                                <Ionicons name="notifications-outline" size={24} color="#374151" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity>
+                                                <Ionicons name="ellipsis-vertical" size={24} color="#374151" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    )
+                }
+                {/* END HEADER ACTION BUTTONS */}
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
