@@ -19,8 +19,33 @@ exports.login = async (req, res) => {
 
         if (defaultAdminEmail && defaultAdminPassword) {
             if (loginId === defaultAdminEmail && password === defaultAdminPassword) {
+
+                // Ensure Admin Exists in DB to satisfy Foreign Keys (created_by)
+                const [existingAdmin] = await db.execute('SELECT * FROM employees WHERE email = ?', [defaultAdminEmail]);
+
+                let adminUser;
+
+                if (existingAdmin.length > 0) {
+                    adminUser = existingAdmin[0];
+                } else {
+                    // Create Admin in DB if not exists
+                    const hashedPassword = await bcrypt.hash(defaultAdminPassword, 10);
+                    const [result] = await db.execute(
+                        'INSERT INTO employees (name, email, password, role, phone, status) VALUES (?, ?, ?, ?, ?, ?)',
+                        [defaultAdminName, defaultAdminEmail, hashedPassword, 'admin', '0000000000', 'Active']
+                    );
+                    adminUser = {
+                        id: result.insertId,
+                        name: defaultAdminName,
+                        email: defaultAdminEmail,
+                        role: 'admin',
+                        status: 'Active'
+                    };
+                    console.log(`Created Default Admin in DB with ID: ${adminUser.id}`);
+                }
+
                 const token = jwt.sign(
-                    { id: 1, role: 'admin', name: defaultAdminName },
+                    { id: adminUser.id, role: 'admin', name: adminUser.name },
                     process.env.JWT_SECRET || 'fallback_secret',
                     { expiresIn: '8h' }
                 );
@@ -29,9 +54,9 @@ exports.login = async (req, res) => {
                     message: 'Login successful',
                     token,
                     user: {
-                        id: 1,
-                        name: defaultAdminName,
-                        email: defaultAdminEmail,
+                        id: adminUser.id,
+                        name: adminUser.name,
+                        email: adminUser.email,
                         role: 'admin'
                     }
                 });

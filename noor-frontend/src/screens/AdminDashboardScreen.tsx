@@ -1,10 +1,13 @@
 import React, { useContext, useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, SafeAreaView, StyleSheet, StatusBar, TextInput, FlatList, Modal, Alert, Platform, useWindowDimensions, Image, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, SafeAreaView, StyleSheet, StatusBar, TextInput, FlatList, Modal, Animated, Dimensions, ActivityIndicator, Alert, Platform, useWindowDimensions, KeyboardAvoidingView, Image } from 'react-native';
+import ConfirmationModal from '../components/ConfirmationModal';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import StageProgressScreen from './StageProgressScreen';
+import ProjectTransactions from '../components/ProjectTransactions';
+import * as DocumentPicker from 'expo-document-picker';
 
 declare const window: any;
 
@@ -134,6 +137,15 @@ const CustomDatePicker = ({ visible, onClose, onSelect, title }: { visible: bool
     );
 };
 
+interface Site {
+    id: number;
+    name: string;
+    location: string;
+    budget: string;
+    client_name?: string;
+    [key: string]: any;
+}
+
 const AdminDashboardScreen = () => {
     const { user, logout } = useContext(AuthContext);
     const handleLogout = () => { logout(); };
@@ -143,6 +155,14 @@ const AdminDashboardScreen = () => {
     const [activeTab, setActiveTab] = useState('Dashboard');
     const [activeProjectTab, setActiveProjectTab] = useState<'Tasks' | 'Transactions' | 'Materials' | 'Files'>('Tasks');
     const [expandedPhaseIds, setExpandedPhaseIds] = useState<number[]>([]);
+
+    // Confirmation Modal State
+    const [confirmModal, setConfirmModal] = useState({
+        visible: false,
+        title: '',
+        message: '',
+        onConfirm: () => { }
+    });
 
     const togglePhase = (phaseId: number) => {
         setExpandedPhaseIds(prev =>
@@ -232,8 +252,8 @@ const AdminDashboardScreen = () => {
     // Project Modal State (List)
     const [projectModalVisible, setProjectModalVisible] = useState(false);
 
-    const [sites, setSites] = useState<any[]>([]);
-    const [selectedSite, setSelectedSite] = useState<any>(null);
+    const [sites, setSites] = useState<Site[]>([]);
+    const [selectedSite, setSelectedSite] = useState<Site | null>(null);
     const [loading, setLoading] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editingSiteId, setEditingSiteId] = useState<number | null>(null);
@@ -294,6 +314,52 @@ const AdminDashboardScreen = () => {
         }
     }, []);
 
+    const handleFileUpload = async () => {
+        if (!selectedSite?.id) return;
+
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: '*/*',
+                copyToCacheDirectory: true
+            });
+
+            if (result.canceled) return;
+
+            const file = result.assets[0];
+            const formData = new FormData();
+            formData.append('file', {
+                uri: file.uri,
+                name: file.name,
+                type: file.mimeType || 'application/octet-stream'
+            } as any);
+
+            // 1. Upload File
+            const uploadRes = await api.post('/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            if (uploadRes.data.url) {
+                // 2. Add Record to Site Files
+                let type = 'document';
+                if (file.mimeType?.startsWith('image/')) type = 'image';
+                else if (file.mimeType?.startsWith('video/')) type = 'video';
+                else if (file.mimeType?.startsWith('audio/')) type = 'audio';
+
+                await api.post(`/sites/${selectedSite.id}/files`, {
+                    url: uploadRes.data.url,
+                    type: type
+                });
+
+                showToast('File uploaded successfully', 'success');
+                fetchProjectFiles(selectedSite.id);
+            }
+        } catch (error) {
+            console.error('Upload error:', error);
+            showToast('Failed to upload file', 'error');
+        }
+    };
+
+
     // Effect for Files
     useEffect(() => {
         if (activeProjectTab === 'Files' && selectedSiteId) {
@@ -335,6 +401,10 @@ const AdminDashboardScreen = () => {
     const [editPhaseModalVisible, setEditPhaseModalVisible] = useState(false);
     const [editingPhaseId, setEditingPhaseId] = useState<number | null>(null);
     const [editingPhaseName, setEditingPhaseName] = useState('');
+
+    // Phase Budget Edit State
+    const [editBudgetModalVisible, setEditBudgetModalVisible] = useState(false);
+    const [editingPhaseBudget, setEditingPhaseBudget] = useState('');
     const [dashboardSearchQuery, setDashboardSearchQuery] = useState('');
     const [datePicker, setDatePicker] = useState<{
         visible: boolean,
@@ -462,7 +532,7 @@ const AdminDashboardScreen = () => {
     };
 
     const handleAddPhase = async () => {
-        if (!newPhaseName.trim()) {
+        if (!selectedSite || !newPhaseName.trim()) {
             showToast('Please enter a stage name', 'error');
             return;
         }
@@ -554,7 +624,7 @@ const AdminDashboardScreen = () => {
     };
 
     const handleAddTask = async () => {
-        if (!newTaskName.trim() || !activePhaseId) {
+        if (!selectedSite || !newTaskName.trim() || !activePhaseId) {
             showToast('Please enter a task name', 'error');
             return;
         }
@@ -899,13 +969,15 @@ const AdminDashboardScreen = () => {
         }
 
         try {
-            // Find current phase to keep order_num
+            // Find current phase to keep order_num and budget
             const currentPhase = projectPhases.find(p => p.id === editingPhaseId);
             const order_num = currentPhase?.order_num || projectPhases.length;
+            const budget = currentPhase?.budget || 0;
 
             await api.put(`/phases/${editingPhaseId}`, {
                 name: editingPhaseName,
-                order_num: order_num
+                order_num: order_num,
+                budget: budget
             });
 
             showToast('Phase updated successfully', 'success');
@@ -916,6 +988,33 @@ const AdminDashboardScreen = () => {
         } catch (error: any) {
             console.error('Error updating phase:', error);
             showToast('Failed to update phase', 'error');
+        }
+    };
+
+    const handleUpdatePhaseBudget = async () => {
+        if (!editingPhaseId) return;
+
+        try {
+            // Find current phase to keep name and order_num
+            const currentPhase = projectPhases.find(p => p.id === editingPhaseId);
+            if (!currentPhase) return;
+
+            const newBudget = parseFloat(editingPhaseBudget) || 0;
+
+            await api.put(`/phases/${editingPhaseId}`, {
+                name: currentPhase.name,
+                order_num: currentPhase.order_num,
+                budget: newBudget
+            });
+
+            showToast('Budget updated successfully', 'success');
+            setEditBudgetModalVisible(false);
+            setEditingPhaseId(null);
+            setEditingPhaseBudget('');
+            if (selectedSite?.id) fetchProjectDetails(selectedSite.id);
+        } catch (error) {
+            console.error('Error updating phase budget:', error);
+            showToast('Failed to update budget', 'error');
         }
     };
 
@@ -931,8 +1030,8 @@ const AdminDashboardScreen = () => {
         });
         setTaskDetailsMode({
             active: true,
-            projectId: selectedSite?.id,
-            projectName: selectedSite?.name,
+            projectId: selectedSite?.id || 0,
+            projectName: selectedSite?.name || 'Unknown Project',
             taskId: task.id,
             taskName: task.name,
             phaseName: phase.name
@@ -1379,22 +1478,7 @@ const AdminDashboardScreen = () => {
                                 icon="bar-chart-outline"
                                 onPress={() => showToast('Reports feature coming soon')}
                             />
-                            <StatusBox
-                                label="Materials"
-                                icon="cube-outline"
-                                onPress={() => {
-                                    setProjectModalVisible(true);
-                                    setActiveProjectTab('Materials');
-                                    // Optionally select a default project if needed or show a global view later. 
-                                    // For now this will just open the project modal which defaults to first project if we don't set one?
-                                    // Actually the project modal requires a selectedSite.
-                                    // Let's create a dedicated global modal for materials or re-use existing flow.
-                                    // Given requirements, "Admin Dashboard -> Materials Section".
-                                    // Let's scroll to a Materials section on the main dashboard instead? Or overlay.
-                                    // For now, let's just make it a filter or scroll target.
-                                    setActiveTab('Materials'); // Switching main tab to Materials
-                                }}
-                            />
+
                         </View>
 
                         {/* Search and Filters */}
@@ -1465,67 +1549,7 @@ const AdminDashboardScreen = () => {
 
 
 
-                {activeTab === 'Materials' && (
-                    <View style={{ flex: 1, padding: 20 }}>
-                        <Text style={{ fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 20 }}>All Material Requests</Text>
-                        <FlatList
-                            data={materialRequests}
-                            keyExtractor={(item) => item.id.toString()}
-                            refreshing={loading}
-                            onRefresh={fetchAdminMaterials}
-                            renderItem={({ item }) => (
-                                <View style={styles.adminMaterialCard}>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                                        <Text style={styles.adminMaterialProject}>{item.site_name}</Text>
-                                        <View style={[styles.adminMaterialStatusBadge,
-                                        item.status === 'Approved' ? styles.badgeApproved :
-                                            item.status === 'Rejected' ? styles.badgeRejected :
-                                                item.status === 'Received' ? styles.badgeReceived : styles.badgePending
-                                        ]}>
-                                            <Text style={[styles.statusBadgeText,
-                                            item.status === 'Approved' ? styles.textApproved :
-                                                item.status === 'Rejected' ? styles.textRejected :
-                                                    item.status === 'Received' ? styles.textReceived : styles.textPending
-                                            ]}>{item.status}</Text>
-                                        </View>
-                                    </View>
-                                    <Text style={styles.adminMaterialName}>{item.quantity} {item.material_name}</Text>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                                        <Text style={styles.adminMaterialMeta}>By: {item.requested_by}</Text>
-                                        <Text style={styles.adminMaterialMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
-                                    </View>
 
-                                    {item.status === 'Received' && (
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: '#f0fdf4', padding: 6, borderRadius: 4, alignSelf: 'flex-start' }}>
-                                            <Ionicons name="checkbox" size={14} color="#166534" />
-                                            <Text style={{ marginLeft: 4, color: '#166534', fontSize: 12, fontWeight: '600' }}>Item Received</Text>
-                                        </View>
-                                    )}
-
-                                    {item.status === 'Pending' && (
-                                        <View style={{ flexDirection: 'row', marginTop: 12, gap: 10 }}>
-                                            <TouchableOpacity
-                                                style={[styles.actionBtn, styles.btnApprove]}
-                                                onPress={() => handleUpdateMaterialStatus(item.id, 'Approved')}
-                                            >
-                                                <Ionicons name="checkmark" size={16} color="#065f46" />
-                                                <Text style={[styles.actionBtnText, { color: '#065f46' }]}>Approve</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                style={[styles.actionBtn, styles.btnReject]}
-                                                onPress={() => handleUpdateMaterialStatus(item.id, 'Rejected')}
-                                            >
-                                                <Ionicons name="close" size={16} color="#991b1b" />
-                                                <Text style={[styles.actionBtnText, { color: '#991b1b' }]}>Reject</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    )}
-                                </View>
-                            )}
-                            ListEmptyComponent={<Text style={{ textAlign: 'center', marginTop: 50, color: '#6b7280' }}>No requests found.</Text>}
-                        />
-                    </View>
-                )}
 
                 {/* WORKERS TAB - Repurposed for Full Page Views if needed */}
                 {activeTab === 'Workers' && (
@@ -1618,7 +1642,7 @@ const AdminDashboardScreen = () => {
                                     projectPhases.map((phase, index) => {
                                         const tasksInPhase = projectTasks.filter(t => t.phase_id === phase.id);
                                         const isExpanded = expandedPhaseIds.includes(phase.id);
-                                        const completedTasks = tasksInPhase.filter(t => t.status === 'Completed').length;
+                                        const completedTasks = tasksInPhase.filter(t => t.status === 'Completed' || t.status === 'completed').length;
                                         const totalTasks = tasksInPhase.length;
                                         const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
@@ -1635,7 +1659,28 @@ const AdminDashboardScreen = () => {
                                                         </View>
                                                         <View style={{ flex: 1 }}>
                                                             <Text style={styles.phaseTitle} numberOfLines={2}>{phase.name}</Text>
-                                                            <Text style={styles.phaseSubtitle}>{completedTasks}/{totalTasks} Completed • {progress}%</Text>
+                                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                                                <Text style={styles.phaseSubtitle}>{completedTasks}/{totalTasks} Completed · {progress}%</Text>
+                                                                <View style={{ width: 1, height: 12, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+                                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                                    <Text style={styles.phaseSubtitle}>
+                                                                        ₹{(phase.used_amount || 0).toLocaleString('en-IN')} / ₹{(phase.budget || 0).toLocaleString('en-IN')}
+                                                                    </Text>
+                                                                    {user?.role === 'admin' && (
+                                                                        <TouchableOpacity
+                                                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                                            onPress={(e) => {
+                                                                                e.stopPropagation();
+                                                                                setEditingPhaseId(phase.id);
+                                                                                setEditingPhaseBudget(String(phase.budget || 0));
+                                                                                setEditBudgetModalVisible(true);
+                                                                            }}
+                                                                        >
+                                                                            <Ionicons name="pencil" size={12} color="rgba(255,255,255,0.8)" />
+                                                                        </TouchableOpacity>
+                                                                    )}
+                                                                </View>
+                                                            </View>
                                                         </View>
                                                     </View>
 
@@ -1663,84 +1708,94 @@ const AdminDashboardScreen = () => {
                                                 {isExpanded && (
                                                     <View style={styles.taskList}>
                                                         {tasksInPhase.length > 0 ? (
-                                                            tasksInPhase.map((task) => <View key={task.id} style={[styles.taskItem, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 12 }]}>
-                                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, width: isMobile ? '100%' : 'auto', flex: isMobile ? 0 : 1, minWidth: 200 }}>
-                                                                    <TouchableOpacity
-                                                                        style={[styles.radioButton, task.status === 'Completed' && styles.radioButtonSelected]}
-                                                                    />
-                                                                    <TouchableOpacity
-                                                                        style={{ flex: 1 }}
-                                                                        onPress={() => {
-                                                                            // Open Stage Progress / Chat View via Modal (to overlay over Project Modal)
-                                                                            setChatPhaseId(phase.id);
-                                                                            setChatTaskId(task.id);
-                                                                            setChatSiteName(selectedSite?.name || 'Site');
-                                                                        }}
-                                                                    >
-                                                                        {task.status === 'waiting_for_approval' && (
-                                                                            <View style={{
-                                                                                backgroundColor: '#FEF9C3',
-                                                                                alignSelf: 'flex-start',
-                                                                                paddingHorizontal: 8,
-                                                                                paddingVertical: 2,
-                                                                                borderRadius: 4,
-                                                                                marginBottom: 4,
-                                                                                borderWidth: 1,
-                                                                                borderColor: '#FDE047'
-                                                                            }}>
-                                                                                <Text style={{ color: '#854D0E', fontSize: 10, fontWeight: 'bold' }}>🟡 Completed – Approval Pending</Text>
-                                                                            </View>
-                                                                        )}
-                                                                        <Text style={styles.taskTitle}>{task.name}</Text>
-                                                                        <Text style={styles.taskSubtitle}>{task.status}</Text>
-                                                                    </TouchableOpacity>
-                                                                </View>
-
-                                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: isMobile ? 'space-between' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
-                                                                    {user?.role === 'admin' && (
-                                                                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                                                                            {task.assignments && task.assignments.length > 0 ? (
-                                                                                <>
-                                                                                    <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                                                                                        {task.assignments.map((assignment: any) => (
-                                                                                            <View key={assignment.id} style={styles.employeeNameBadge}>
-                                                                                                <Text style={{ fontSize: 10 }}>👷</Text>
-                                                                                                <Text style={styles.employeeNameText}>
-                                                                                                    {assignment.name ? assignment.name.split(' ')[0] : 'Unknown'}
-                                                                                                </Text>
-                                                                                            </View>
-                                                                                        ))}
-                                                                                        {task.due_date && (
-                                                                                            <View style={[styles.employeeNameBadge, { backgroundColor: '#F3F4F6', borderColor: '#D1D5DB' }]}>
-                                                                                                <Text style={{ fontSize: 10 }}>📅</Text>
-                                                                                                <Text style={[styles.employeeNameText, { color: '#374151' }]}>
-                                                                                                    Due: {new Date(task.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                                                                </Text>
-                                                                                            </View>
-                                                                                        )}
-                                                                                    </View>
-                                                                                </>
-                                                                            ) : null}
-
+                                                            tasksInPhase.map((task) => {
+                                                                const isCompleted = task.status === 'Completed' || task.status === 'completed';
+                                                                return (
+                                                                    <View key={task.id} style={[
+                                                                        styles.taskItem,
+                                                                        isCompleted && styles.taskItemCompleted,
+                                                                        isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 12 }
+                                                                    ]}>
+                                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, width: isMobile ? '100%' : 'auto', flex: isMobile ? 0 : 1, minWidth: 200 }}>
                                                                             <TouchableOpacity
-                                                                                style={styles.addAssigneeBtn}
-                                                                                onPress={() => handleAssignTask(task, phase)}
+                                                                                style={[styles.radioButton, isCompleted && styles.radioButtonSelected]}
                                                                             >
-                                                                                <Ionicons name="pencil" size={16} color="#374151" />
+                                                                                {isCompleted && <Ionicons name="checkmark" size={12} color="#fff" />}
+                                                                            </TouchableOpacity>
+                                                                            <TouchableOpacity
+                                                                                style={{ flex: 1 }}
+                                                                                onPress={() => {
+                                                                                    // Open Stage Progress / Chat View via Modal (to overlay over Project Modal)
+                                                                                    setChatPhaseId(phase.id);
+                                                                                    setChatTaskId(task.id);
+                                                                                    setChatSiteName(selectedSite?.name || 'Site');
+                                                                                }}
+                                                                            >
+                                                                                {task.status === 'waiting_for_approval' && (
+                                                                                    <View style={{
+                                                                                        backgroundColor: '#FEF9C3',
+                                                                                        alignSelf: 'flex-start',
+                                                                                        paddingHorizontal: 8,
+                                                                                        paddingVertical: 2,
+                                                                                        borderRadius: 4,
+                                                                                        marginBottom: 4,
+                                                                                        borderWidth: 1,
+                                                                                        borderColor: '#FDE047'
+                                                                                    }}>
+                                                                                        <Text style={{ color: '#854D0E', fontSize: 10, fontWeight: 'bold' }}>🟡 Completed – Approval Pending</Text>
+                                                                                    </View>
+                                                                                )}
+                                                                                <Text style={styles.taskTitle}>{task.name}</Text>
+                                                                                <Text style={styles.taskSubtitle}>{task.status}</Text>
                                                                             </TouchableOpacity>
                                                                         </View>
-                                                                    )}
+
+                                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: isMobile ? 'space-between' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
+                                                                            {user?.role === 'admin' && (
+                                                                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                                                                    {task.assignments && task.assignments.length > 0 ? (
+                                                                                        <>
+                                                                                            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                                                                                {task.assignments.map((assignment: any) => (
+                                                                                                    <View key={assignment.id} style={styles.employeeNameBadge}>
+                                                                                                        <Text style={{ fontSize: 10 }}>👷</Text>
+                                                                                                        <Text style={styles.employeeNameText}>
+                                                                                                            {assignment.name ? assignment.name.split(' ')[0] : 'Unknown'}
+                                                                                                        </Text>
+                                                                                                    </View>
+                                                                                                ))}
+                                                                                                {task.due_date && (
+                                                                                                    <View style={[styles.employeeNameBadge, { backgroundColor: '#F3F4F6', borderColor: '#D1D5DB' }]}>
+                                                                                                        <Text style={{ fontSize: 10 }}>📅</Text>
+                                                                                                        <Text style={[styles.employeeNameText, { color: '#374151' }]}>
+                                                                                                            Due: {new Date(task.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                                                                        </Text>
+                                                                                                    </View>
+                                                                                                )}
+                                                                                            </View>
+                                                                                        </>
+                                                                                    ) : null}
+
+                                                                                    <TouchableOpacity
+                                                                                        style={styles.addAssigneeBtn}
+                                                                                        onPress={() => handleAssignTask(task, phase)}
+                                                                                    >
+                                                                                        <Ionicons name="pencil" size={16} color="#374151" />
+                                                                                    </TouchableOpacity>
+                                                                                </View>
+                                                                            )}
 
 
 
 
 
-                                                                    <TouchableOpacity style={styles.iconButton} onPress={() => confirmDeleteTask(task.id)}>
-                                                                        <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                                                                    </TouchableOpacity>
-                                                                </View>
-                                                            </View>
-                                                            )
+                                                                            <TouchableOpacity style={styles.iconButton} onPress={() => confirmDeleteTask(task.id)}>
+                                                                                <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                                                                            </TouchableOpacity>
+                                                                        </View>
+                                                                    </View>
+                                                                );
+                                                            })
                                                         ) : (
                                                             <Text style={styles.noTasksText}>No tasks in this stage</Text>
                                                         )}
@@ -1767,14 +1822,12 @@ const AdminDashboardScreen = () => {
                         )
                         }
 
-                        {activeProjectTab === 'Transactions' && (
-                            <View style={styles.tabContentContainer}>
-                                <Text style={styles.tabSectionTitle}>Transactions</Text>
-                                <View style={styles.emptyTabState}>
-                                    <Ionicons name="wallet-outline" size={48} color="#e5e7eb" />
-                                    <Text style={styles.emptyTabText}>No transactions found</Text>
-                                </View>
-                            </View>
+                        {activeProjectTab === 'Transactions' && selectedSite && (
+                            <ProjectTransactions
+                                siteId={selectedSite.id}
+                                phases={projectPhases}
+                                clientName={selectedSite?.client_name}
+                            />
                         )}
 
                         {
@@ -1782,16 +1835,7 @@ const AdminDashboardScreen = () => {
                                 <View style={styles.tabContentContainer}>
                                     <View style={styles.sectionHeaderRow}>
                                         <Text style={styles.tabSectionTitle}>Material Requests</Text>
-                                        <TouchableOpacity
-                                            style={styles.addButtonSmall}
-                                            onPress={() => {
-                                                // Could open a modal to add material request on behalf of site
-                                                Alert.alert('Info', 'Admins can utilize the employee view to request materials.');
-                                            }}
-                                        >
-                                            <Ionicons name="add" size={18} color="#fff" />
-                                            <Text style={styles.addButtonTextSmall}>Add Request</Text>
-                                        </TouchableOpacity>
+
                                     </View>
 
                                     {projectMaterials.length > 0 ? (
@@ -1802,6 +1846,7 @@ const AdminDashboardScreen = () => {
                                                 <View style={styles.adminMaterialCard}>
                                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                                                         <Text style={styles.adminMaterialName}>{item.material_name}</Text>
+                                                        {item.task_name && <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Requested for Task: {item.task_name}</Text>}
                                                         <View style={[styles.adminMaterialStatusBadge,
                                                         item.status === 'Approved' ? styles.badgeApproved :
                                                             item.status === 'Rejected' ? styles.badgeRejected :
@@ -1817,9 +1862,12 @@ const AdminDashboardScreen = () => {
 
                                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
                                                         <Text style={styles.adminMaterialMeta}>Qty: {item.quantity}</Text>
-                                                        <Text style={styles.adminMaterialMeta}>Req By: {employees.find(e => e.id === item.employee_id)?.name || 'Employee'}</Text>
+                                                        <Text style={styles.adminMaterialMeta}>By: {item.requested_by || 'Unknown'}</Text>
                                                     </View>
-                                                    <Text style={[styles.adminMaterialMeta, { marginTop: 2 }]}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+                                                        <Text style={styles.adminMaterialMeta}>{item.site_name || selectedSite?.name || 'Project Site'}</Text>
+                                                        <Text style={styles.adminMaterialMeta}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                                                    </View>
 
                                                     {item.status === 'Received' && (
                                                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: '#f0fdf4', padding: 6, borderRadius: 4, alignSelf: 'flex-start' }}>
@@ -1832,9 +1880,17 @@ const AdminDashboardScreen = () => {
                                                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
                                                             <TouchableOpacity
                                                                 style={[styles.actionBtn, styles.btnApprove]}
-                                                                onPress={async () => {
-                                                                    await handleUpdateMaterialStatus(item.id, 'Approved');
-                                                                    fetchProjectMaterials(selectedSite.id); // Refresh local list
+                                                                onPress={() => {
+                                                                    setConfirmModal({
+                                                                        visible: true,
+                                                                        title: "Confirm Approval",
+                                                                        message: "Are you sure you want to approve this material request?",
+                                                                        onConfirm: async () => {
+                                                                            setConfirmModal(prev => ({ ...prev, visible: false }));
+                                                                            await handleUpdateMaterialStatus(item.id, 'Approved');
+                                                                            if (selectedSite?.id) fetchProjectMaterials(selectedSite.id);
+                                                                        }
+                                                                    });
                                                                 }}
                                                             >
                                                                 <Ionicons name="checkmark-circle" size={16} color="#059669" />
@@ -1842,9 +1898,17 @@ const AdminDashboardScreen = () => {
                                                             </TouchableOpacity>
                                                             <TouchableOpacity
                                                                 style={[styles.actionBtn, styles.btnReject]}
-                                                                onPress={async () => {
-                                                                    await handleUpdateMaterialStatus(item.id, 'Rejected');
-                                                                    fetchProjectMaterials(selectedSite.id); // Refresh local list
+                                                                onPress={() => {
+                                                                    setConfirmModal({
+                                                                        visible: true,
+                                                                        title: "Confirm Rejection",
+                                                                        message: "Are you sure you want to reject this material request?",
+                                                                        onConfirm: async () => {
+                                                                            setConfirmModal(prev => ({ ...prev, visible: false }));
+                                                                            await handleUpdateMaterialStatus(item.id, 'Rejected');
+                                                                            if (selectedSite?.id) fetchProjectMaterials(selectedSite.id);
+                                                                        }
+                                                                    });
                                                                 }}
                                                             >
                                                                 <Ionicons name="close-circle" size={16} color="#ef4444" />
@@ -1871,13 +1935,7 @@ const AdminDashboardScreen = () => {
                                 <View style={styles.tabContentContainer}>
                                     <View style={styles.sectionHeaderRow}>
                                         <Text style={styles.tabSectionTitle}>Project Files</Text>
-                                        <TouchableOpacity
-                                            style={styles.addButtonSmall}
-                                            onPress={() => Alert.alert('Upload', 'Upload feature coming soon')}
-                                        >
-                                            <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
-                                            <Text style={styles.addButtonTextSmall}>Upload</Text>
-                                        </TouchableOpacity>
+
                                     </View>
 
                                     {/* File Type Tabs */}
@@ -1977,7 +2035,8 @@ const AdminDashboardScreen = () => {
                                                                         {file.type === 'image' ? (
                                                                             <Image
                                                                                 source={{ uri: file.url.startsWith('http') ? file.url : `http://localhost:5000${file.url}` }}
-                                                                                style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
+                                                                                style={{ width: '100%', height: '100%' }}
+                                                                                resizeMode="cover"
                                                                             />
                                                                         ) : (
                                                                             <View style={{
@@ -2105,6 +2164,41 @@ const AdminDashboardScreen = () => {
                                 <Text style={styles.miniModalSaveText}>Update</Text>
                             </TouchableOpacity>
                         </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Edit Budget Modal */}
+            <Modal
+                visible={editBudgetModalVisible}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setEditBudgetModalVisible(false)}
+            >
+                <View style={styles.miniModalOverlay}>
+                    <View style={styles.miniModalContent}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                            <Text style={styles.miniModalTitle}>Update Stage Budget</Text>
+                            <TouchableOpacity onPress={() => setEditBudgetModalVisible(false)}>
+                                <Ionicons name="close" size={20} color="#6b7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={{ fontSize: 12, color: '#6b7280', marginBottom: 5 }}>Budget Amount (₹)</Text>
+                        <TextInput
+                            style={styles.miniModalInput}
+                            placeholder="Enter budget amount"
+                            value={editingPhaseBudget}
+                            onChangeText={setEditingPhaseBudget}
+                            keyboardType="numeric"
+                            autoFocus
+                        />
+                        <TouchableOpacity
+                            style={[styles.miniModalButton, { marginTop: 10 }]}
+                            onPress={handleUpdatePhaseBudget}
+                        >
+                            <Text style={styles.miniModalButtonText}>Update Budget</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -2372,17 +2466,7 @@ const AdminDashboardScreen = () => {
                     <Text style={[styles.newNavText, activeTab === 'Workers' && styles.newNavTextActive]}>Workers</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={styles.newNavItem}
-                    onPress={() => setActiveTab('Materials')}
-                >
-                    <Ionicons
-                        name="cube-outline"
-                        size={22}
-                        color={activeTab === 'Materials' ? '#8B0000' : '#9ca3af'}
-                    />
-                    <Text style={[styles.newNavText, activeTab === 'Materials' && styles.newNavTextActive]}>Materials</Text>
-                </TouchableOpacity>
+
             </View >
 
 
@@ -2550,6 +2634,14 @@ const AdminDashboardScreen = () => {
                 title={datePicker.title}
                 onClose={() => setDatePicker(prev => ({ ...prev, visible: false }))}
                 onSelect={handleDateConfirm}
+            />
+
+            <ConfirmationModal
+                visible={confirmModal.visible}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
             />
 
             {/* Stage Progress / Chat Modal - Renders on top of everything */}
@@ -4463,6 +4555,18 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#fff',
     },
+    miniModalButton: {
+        backgroundColor: '#8B0000',
+        borderRadius: 8,
+        paddingVertical: 12,
+        alignItems: 'center',
+        width: '100%',
+    },
+    miniModalButtonText: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#fff',
+    },
     // Create Project Form Styles
     createModalContainer: {
         flex: 1,
@@ -4758,6 +4862,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         rowGap: 8
+    },
+    taskItemCompleted: {
+        backgroundColor: '#f0fdf4',
     },
     taskTitle: {
         fontSize: 14,

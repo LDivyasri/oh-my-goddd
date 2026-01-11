@@ -4,15 +4,15 @@ const db = require('../config/db');
 exports.createMaterialRequest = async (req, res) => {
     try {
         const employeeId = req.user.id;
-        const { siteId, materialName, quantity, notes } = req.body;
+        const { siteId, materialName, quantity, notes, taskId } = req.body;
 
-        if (!siteId || !materialName || !quantity) {
-            return res.status(400).json({ message: 'Missing required fields' });
+        if (!siteId || !materialName || !quantity || !taskId) {
+            return res.status(400).json({ message: 'Missing required fields (including Task selection)' });
         }
 
         await db.query(
-            'INSERT INTO material_requests (site_id, employee_id, material_name, quantity, notes, status) VALUES (?, ?, ?, ?, ?, "Pending")',
-            [siteId, employeeId, materialName, quantity, notes || null]
+            'INSERT INTO material_requests (site_id, employee_id, material_name, quantity, notes, task_id, status) VALUES (?, ?, ?, ?, ?, ?, "Pending")',
+            [siteId, employeeId, materialName, quantity, notes || null, taskId]
         );
 
         // Notify Admin
@@ -37,16 +37,20 @@ exports.getMaterialRequests = async (req, res) => {
         const isAdmin = role === 'Admin' || role === 'admin';
 
         let query = `
-            SELECT mr.*, e.name as requested_by 
+            SELECT mr.*, e.name as requested_by, s.name as site_name, t.name as task_name
             FROM material_requests mr
             JOIN employees e ON mr.employee_id = e.id
+            JOIN sites s ON mr.site_id = s.id
+            LEFT JOIN tasks t ON mr.task_id = t.id
             WHERE mr.site_id = ?
         `;
         let params = [siteId];
 
-
-        // Employee sees only their own requests? (Assume they see own for now, or all for their site?)
-        // Spec usually implies they see their own or site-wide. Let's show all for the site to keep coordination simple.
+        // CHECK: If not admin, restrict to own requests
+        if (!isAdmin) {
+            query += ' AND mr.employee_id = ?';
+            params.push(id);
+        }
 
         query += ' ORDER BY mr.created_at DESC';
 
@@ -71,7 +75,7 @@ exports.getAllMaterialRequests = async (req, res) => {
             JOIN sites s ON mr.site_id = s.id
             JOIN employees e ON mr.employee_id = e.id
             ORDER BY mr.created_at DESC
-        `);
+            `);
 
         res.json({ requests });
     } catch (error) {
@@ -101,12 +105,12 @@ exports.updateMaterialRequestStatus = async (req, res) => {
         if (reqData.length > 0) {
             const r = reqData[0];
             await db.query(`
-                INSERT INTO notifications (project_id, employee_id, type, message, is_read, created_at)
-                VALUES (?, ?, 'MATERIAL_UPDATE', ?, 0, NOW())
-            `, [r.site_id, r.employee_id, `Your material request for ${r.material_name} was ${status}`]);
+                INSERT INTO notifications(project_id, employee_id, type, message, is_read, created_at)
+        VALUES(?, ?, 'MATERIAL_UPDATE', ?, 0, NOW())
+            `, [r.site_id, r.employee_id, `Your material request for ${r.material_name} was ${status} `]);
         }
 
-        res.json({ message: `Request ${status}` });
+        res.json({ message: `Request ${status} ` });
     } catch (error) {
         console.error('Error updating material request:', error);
         res.status(500).json({ message: 'Error updating request' });
@@ -132,10 +136,10 @@ exports.markMaterialReceived = async (req, res) => {
 
         // Notify Admin
         await db.query(`
-            INSERT INTO notifications (project_id, employee_id, type, message, is_read, created_at)
-            SELECT ?, id, 'MATERIAL_RECEIVED', ?, 0, NOW()
+            INSERT INTO notifications(project_id, employee_id, type, message, is_read, created_at)
+        SELECT ?, id, 'MATERIAL_RECEIVED', ?, 0, NOW()
             FROM employees WHERE role = 'Admin' OR role = 'admin'
-        `, [reqItem.site_id, `Material Received: ${reqItem.material_name} by employee`]);
+            `, [reqItem.site_id, `Material Received: ${reqItem.material_name} by employee`]);
 
         res.json({ message: 'Marked as received' });
     } catch (error) {

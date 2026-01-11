@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect, useContext } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert, ScrollView, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert, ScrollView, Modal, TextInput, Platform } from 'react-native';
+import ConfirmationModal from '../components/ConfirmationModal';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
@@ -17,7 +18,11 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
     // Material State
     const [materials, setMaterials] = useState<any[]>([]);
     const [requestModalVisible, setRequestModalVisible] = useState(false);
-    const [newRequest, setNewRequest] = useState({ materialName: '', quantity: '', notes: '' });
+    const [newRequest, setNewRequest] = useState({ materialName: '', quantity: '', notes: '', taskId: null });
+    const [taskSelectorVisible, setTaskSelectorVisible] = useState(false);
+
+    // Get all tasks suitable for material request (active tasks)
+    const availableTasks = phases.flatMap(p => p.myTasks || []);
 
     const fetchMaterials = async () => {
         try {
@@ -29,8 +34,8 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
     };
 
     const handleSubmitRequest = async () => {
-        if (!newRequest.materialName || !newRequest.quantity) {
-            Alert.alert('Error', 'Material Name and Quantity are required');
+        if (!newRequest.materialName || !newRequest.quantity || !newRequest.taskId) {
+            Alert.alert('Error', 'Material Name, Quantity, and Task are required');
             return;
         }
 
@@ -41,7 +46,7 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
             });
             Alert.alert('Success', 'Material request submitted');
             setRequestModalVisible(false);
-            setNewRequest({ materialName: '', quantity: '', notes: '' });
+            setNewRequest({ materialName: '', quantity: '', notes: '', taskId: null });
             fetchMaterials();
         } catch (error) {
             console.error('Error submitting request:', error);
@@ -49,14 +54,40 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
         }
     };
 
+    // Confirmation Modal State
+    const [confirmModal, setConfirmModal] = useState({
+        visible: false,
+        title: '',
+        message: '',
+        onConfirm: () => { }
+    });
+
+    const confirmAction = (title: string, message: string, onConfirm: () => void) => {
+        setConfirmModal({
+            visible: true,
+            title,
+            message,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, visible: false }));
+                await onConfirm();
+            }
+        });
+    };
+
     const handleMarkReceived = async (reqId: number) => {
-        try {
-            await api.put(`/materials/${reqId}/received`);
-            fetchMaterials(); // Refresh list
-        } catch (error) {
-            console.error('Error marking received:', error);
-            Alert.alert('Error', 'Failed to update status');
-        }
+        confirmAction(
+            "Confirm Receipt",
+            "Are you sure you have received this material?",
+            async () => {
+                try {
+                    await api.put(`/materials/${reqId}/received`);
+                    fetchMaterials(); // Refresh list
+                } catch (error) {
+                    console.error('Error marking received:', error);
+                    Alert.alert('Error', 'Failed to update status');
+                }
+            }
+        );
     };
 
     // Refresh materials when tab is active
@@ -179,6 +210,13 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                             ) : (
                                 phases.map((phase) => {
                                     const isExpanded = expandedPhaseIds.indexOf(phase.id) > -1;
+
+                                    // Progress Calculation
+                                    const tasksInPhase = phase.myTasks || [];
+                                    const completedTasks = tasksInPhase.filter((t: any) => t.status === 'completed' || t.status === 'Completed').length;
+                                    const totalTasks = tasksInPhase.length;
+                                    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
                                     // Status Logic
                                     let statusColor = '#F59E0B';
                                     if (phase.status === 'Completed') statusColor = '#10B981';
@@ -209,7 +247,7 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                                                             {phase.name}
                                                         </Text>
                                                         <Text style={phase.status === 'Completed' ? styles.phaseSubtitleCompleted : styles.phaseSubtitleLight}>
-                                                            {formatDate(phase.start_date)} - {formatDate(phase.due_date)}
+                                                            {completedTasks}/{totalTasks} Completed · {progress}% · ₹{(phase.used_amount || 0).toLocaleString('en-IN')} / ₹{(phase.budget || 0).toLocaleString('en-IN')}
                                                         </Text>
                                                     </View>
 
@@ -237,40 +275,45 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                                             {isExpanded && (
                                                 <View style={styles.taskList}>
                                                     {phase.myTasks && phase.myTasks.length > 0 ? (
-                                                        phase.myTasks.map((task: any) => (
-                                                            <TouchableOpacity
-                                                                key={task.id}
-                                                                style={styles.taskItem}
-                                                                onPress={() => handleTaskClick(task)}
-                                                            >
-                                                                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                                                                    <View style={[styles.radioButton, task.status === 'completed' && styles.radioButtonSelected]} />
-                                                                    <View style={{ marginLeft: 12, flex: 1 }}>
-                                                                        <Text style={[styles.taskTitle, task.status === 'completed' && styles.taskCompletedText]}>
-                                                                            {task.name}
-                                                                        </Text>
-                                                                        <Text style={styles.taskSubtitle}>
-                                                                            Due: {formatDate(task.due_date)}
+                                                        phase.myTasks.map((task: any) => {
+                                                            const isCompleted = task.status === 'completed' || task.status === 'Completed';
+                                                            return (
+                                                                <TouchableOpacity
+                                                                    key={task.id}
+                                                                    style={[styles.taskItem, isCompleted && styles.taskItemCompleted]}
+                                                                    onPress={() => handleTaskClick(task)}
+                                                                >
+                                                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                                                        <View style={[styles.radioButton, isCompleted && styles.radioButtonSelected]}>
+                                                                            {isCompleted && <Ionicons name="checkmark" size={12} color="#fff" />}
+                                                                        </View>
+                                                                        <View style={{ marginLeft: 12, flex: 1 }}>
+                                                                            <Text style={[styles.taskTitle, task.status === 'completed' && styles.taskCompletedText]}>
+                                                                                {task.name}
+                                                                            </Text>
+                                                                            <Text style={styles.taskSubtitle}>
+                                                                                Due: {formatDate(task.due_date)}
+                                                                            </Text>
+                                                                        </View>
+                                                                    </View>
+
+                                                                    <View style={[
+                                                                        styles.statusPill,
+                                                                        task.status === 'completed' ? styles.statusCompleted :
+                                                                            task.status === 'in_progress' ? styles.statusProgress : styles.statusPending
+                                                                    ]}>
+                                                                        <Text style={[
+                                                                            styles.statusText,
+                                                                            task.status === 'completed' ? styles.statusTextCompleted :
+                                                                                task.status === 'in_progress' ? styles.statusTextProgress : styles.statusTextPending
+                                                                        ]}>
+                                                                            {task.status === 'completed' ? 'Done' :
+                                                                                task.status === 'waiting_for_approval' ? 'Review' : 'Pending'}
                                                                         </Text>
                                                                     </View>
-                                                                </View>
-
-                                                                <View style={[
-                                                                    styles.statusPill,
-                                                                    task.status === 'completed' ? styles.statusCompleted :
-                                                                        task.status === 'in_progress' ? styles.statusProgress : styles.statusPending
-                                                                ]}>
-                                                                    <Text style={[
-                                                                        styles.statusText,
-                                                                        task.status === 'completed' ? styles.statusTextCompleted :
-                                                                            task.status === 'in_progress' ? styles.statusTextProgress : styles.statusTextPending
-                                                                    ]}>
-                                                                        {task.status === 'completed' ? 'Done' :
-                                                                            task.status === 'waiting_for_approval' ? 'Review' : 'Pending'}
-                                                                    </Text>
-                                                                </View>
-                                                            </TouchableOpacity>
-                                                        ))
+                                                                </TouchableOpacity>
+                                                            );
+                                                        })
                                                     ) : (
                                                         <Text style={styles.noTasksText}>No tasks assigned to you in this stage.</Text>
                                                     )}
@@ -313,7 +356,14 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                                                 ]}>{item.status}</Text>
                                             </View>
                                         </View>
-                                        <Text style={styles.materialMeta}>Qty: {item.quantity} • {formatDate(item.created_at)}</Text>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                                            <Text style={styles.materialMeta}>Qty: {item.quantity}</Text>
+                                            <Text style={styles.materialMeta}>By: {item.requested_by || 'Unknown'}</Text>
+                                        </View>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                            <Text style={styles.materialMeta}>{item.site_name || siteName || 'Project'}</Text>
+                                            <Text style={styles.materialMeta}>{formatDate(item.created_at)}</Text>
+                                        </View>
                                         {item.notes && <Text style={styles.materialNotes}>"{item.notes}"</Text>}
 
                                         {item.status === 'Approved' && (
@@ -366,6 +416,59 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                         </View>
 
                         <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Related Task <Text style={{ color: 'red' }}>*</Text></Text>
+                            <TouchableOpacity
+                                style={styles.inputField}
+                                onPress={() => setTaskSelectorVisible(true)}
+                            >
+                                <Text style={{ color: newRequest.taskId ? '#111827' : '#9CA3AF' }}>
+                                    {newRequest.taskId
+                                        ? availableTasks.find(t => t.id === newRequest.taskId)?.name
+                                        : 'Select a task...'}
+                                </Text>
+                                <Ionicons name="chevron-down" size={20} color="#6b7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <Modal
+                            visible={taskSelectorVisible}
+                            transparent={true}
+                            animationType="fade"
+                            onRequestClose={() => setTaskSelectorVisible(false)}
+                        >
+                            <View style={styles.modalOverlay}>
+                                <View style={[styles.requestModalContent, { maxHeight: '60%' }]}>
+                                    <Text style={styles.inputLabel}>Select Task</Text>
+                                    <ScrollView contentContainerStyle={{ paddingVertical: 10 }}>
+                                        {availableTasks.length === 0 ? (
+                                            <Text style={styles.emptyText}>No active tasks found.</Text>
+                                        ) : (
+                                            availableTasks.map(task => (
+                                                <TouchableOpacity
+                                                    key={task.id}
+                                                    style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }}
+                                                    onPress={() => {
+                                                        setNewRequest({ ...newRequest, taskId: task.id });
+                                                        setTaskSelectorVisible(false);
+                                                    }}
+                                                >
+                                                    <Text style={styles.taskTitle}>{task.name}</Text>
+                                                    <Text style={{ fontSize: 12, color: '#6b7280' }}>Due: {new Date(task.due_date).toLocaleDateString()}</Text>
+                                                </TouchableOpacity>
+                                            ))
+                                        )}
+                                    </ScrollView>
+                                    <TouchableOpacity
+                                        style={[styles.backButton, { alignSelf: 'center', marginTop: 10 }]}
+                                        onPress={() => setTaskSelectorVisible(false)}
+                                    >
+                                        <Text style={{ color: '#6B7280' }}>Cancel</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Modal>
+
+                        <View style={styles.inputGroup}>
                             <Text style={styles.inputLabel}>Quantity <Text style={{ color: 'red' }}>*</Text></Text>
                             <TextInput
                                 style={styles.inputField}
@@ -393,6 +496,15 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                     </View>
                 </View>
             </Modal>
+
+            <ConfirmationModal
+                visible={confirmModal.visible}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+            />
+
         </SafeAreaView>
     );
 };
@@ -547,6 +659,9 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#f3f4f6',
+    },
+    taskItemCompleted: {
+        backgroundColor: '#f0fdf4',
     },
     radioButton: {
         width: 18,

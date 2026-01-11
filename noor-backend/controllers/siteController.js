@@ -150,7 +150,8 @@ exports.getSiteWithPhases = async (req, res) => {
         }
 
         const [phases] = await db.query(`
-            SELECT p.*, e.name as assigned_employee_name
+            SELECT p.*, e.name as assigned_employee_name,
+                   COALESCE((SELECT SUM(amount) FROM transactions WHERE phase_id = p.id AND type = 'OUT'), 0) as used_amount
             FROM phases p
             LEFT JOIN employees e ON p.assigned_to = e.id
             WHERE p.site_id = ?
@@ -191,9 +192,13 @@ exports.getSiteWithPhases = async (req, res) => {
 exports.getPhases = async (req, res) => {
     try {
         const { siteId } = req.params;
-        const [phases] = await db.query(
-            'SELECT * FROM phases WHERE site_id = ? ORDER BY order_num', [siteId]
-        );
+        const [phases] = await db.query(`
+            SELECT p.*,
+                   COALESCE((SELECT SUM(amount) FROM transactions WHERE phase_id = p.id AND type = 'OUT'), 0) as used_amount
+            FROM phases p
+            WHERE p.site_id = ?
+            ORDER BY p.order_num
+        `, [siteId]);
         res.json({ phases });
     } catch (error) {
         console.error('Error fetching phases:', error);
@@ -554,15 +559,29 @@ exports.getAssignedTasks = async (req, res) => {
     try {
         const employeeId = req.user.id;
 
-        const [tasks] = await db.query(`
+        const { status } = req.query; // 'completed' or undefined (active)
+
+        let query = `
             SELECT t.*, s.name as site_name, s.location as site_location, p.name as phase_name
             FROM tasks t
             JOIN task_assignments ta ON t.id = ta.task_id
             LEFT JOIN sites s ON t.site_id = s.id
             LEFT JOIN phases p ON t.phase_id = p.id
             WHERE ta.employee_id = ?
-            ORDER BY t.due_date ASC, t.created_at DESC
-        `, [employeeId]);
+        `;
+
+        if (status === 'completed') {
+            query += ` AND LOWER(t.status) = 'completed'`;
+        } else {
+            // Default: Show Active (Not Completed)
+            // This includes: Not Started, In Progress, Waiting for Approval, Change Required
+            query += ` AND (LOWER(t.status) != 'completed' OR t.status IS NULL)`;
+        }
+
+        query += ` ORDER BY t.due_date ASC, t.created_at DESC`;
+
+        const [tasks] = await db.query(query, [employeeId]);
+
 
         res.json({ tasks });
     } catch (error) {
@@ -886,13 +905,9 @@ exports.getEmployeeDashboardStats = async (req, res) => {
                 COUNT(*) as total_tasks,
                 COALESCE(SUM(CASE 
                     WHEN LOWER(t.status) = 'completed' 
-                    OR LOWER(t.status) LIKE '%waiting for admin approval%' 
-                    OR LOWER(t.status) = 'waiting_for_approval'
                     THEN 1 ELSE 0 END), 0) as completed_tasks,
                 COALESCE(SUM(CASE 
                     WHEN LOWER(t.status) != 'completed' 
-                    AND LOWER(t.status) NOT LIKE '%waiting for admin approval%' 
-                    AND LOWER(t.status) != 'waiting_for_approval'
                     THEN 1 ELSE 0 END), 0) as pending_tasks
             FROM tasks t
             WHERE t.employee_id = ? 
@@ -1319,11 +1334,11 @@ exports.getNotifications = async (req, res) => {
         let params = [];
 
         if (isAdmin) {
-            // Admin sees Task Updates, Chat Updates, Stage Completions
-            query += ` WHERE n.type IN ('TASK_UPDATE', 'CHAT_UPDATE', 'STAGE_COMPLETED')`;
+            // Admin sees Task Updates, Chat Updates, Stage Completions, and Submissions/Requests
+            query += ` WHERE n.type IN ('TASK_UPDATE', 'CHAT_UPDATE', 'STAGE_COMPLETED', 'TASK_SUBMITTED', 'MATERIAL_REQUEST', 'MATERIAL_UPDATE')`;
         } else {
             // Employee sees Assignments where they are the 'employee_id' (Recipient override)
-            query += ` WHERE n.employee_id = ? AND n.type = 'ASSIGNMENT'`;
+            query += ` WHERE n.employee_id = ? AND n.type IN ('ASSIGNMENT', 'TASK_APPROVED', 'TASK_REJECTED')`;
             params.push(userId);
         }
 
@@ -1336,9 +1351,9 @@ exports.getNotifications = async (req, res) => {
         let countParams = [];
 
         if (isAdmin) {
-            countQuery += ` AND type IN ('TASK_UPDATE', 'CHAT_UPDATE', 'STAGE_COMPLETED')`;
+            countQuery += ` AND type IN ('TASK_UPDATE', 'CHAT_UPDATE', 'STAGE_COMPLETED', 'TASK_SUBMITTED', 'MATERIAL_REQUEST', 'MATERIAL_UPDATE')`;
         } else {
-            countQuery += ` AND employee_id = ? AND type = 'ASSIGNMENT'`;
+            countQuery += ` AND employee_id = ? AND type IN ('ASSIGNMENT', 'TASK_APPROVED', 'TASK_REJECTED')`;
             countParams.push(userId);
         }
 
@@ -1596,25 +1611,75 @@ exports.getSiteFiles = async (req, res) => {
         const [files] = await db.query(`
             SELECT 
                 tm.id, 
-                tm.content as url, 
+                CASE 
+                    WHEN tm.media_url IS NOT NULL AND tm.media_url != '' THEN tm.media_url
+                    ELSE tm.content 
+                END as url,
                 tm.type, 
                 tm.created_at, 
                 tm.task_id,
                 t.name as task_name,
                 p.name as phase_name,
-                e.name as uploaded_by
+                e.name as uploaded_by,
+                tm.site_id
             FROM task_messages tm
-            JOIN tasks t ON tm.task_id = t.id
-            JOIN phases p ON t.phase_id = p.id
+            LEFT JOIN tasks t ON tm.task_id = t.id
+            LEFT JOIN phases p ON t.phase_id = p.id
             LEFT JOIN employees e ON tm.sender_id = e.id
-            WHERE p.site_id = ? 
+            WHERE (p.site_id = ? OR tm.site_id = ?)
             AND tm.type IN ('image', 'video', 'audio', 'document', 'link')
             ORDER BY tm.created_at DESC
-        `, [siteId]);
+        `, [siteId, siteId]);
 
         res.json({ files });
     } catch (error) {
         console.error('Error fetching site files:', error);
         res.status(500).json({ message: 'Error fetching site files' });
+    }
+};
+
+// Add File to Site (Direct Upload)
+exports.addSiteFile = async (req, res) => {
+    try {
+        const { siteId } = req.params;
+        const { url, type } = req.body;
+        const senderId = req.user ? req.user.id : null;
+        const fs = require('fs');
+
+        const logMsg = `[addSiteFile] ${new Date().toISOString()} Request: SiteID=${siteId}, URL=${url}, Type=${type}, Sender=${senderId}\n`;
+        try {
+            fs.appendFileSync('debug_controller.txt', logMsg);
+        } catch (e) { console.error('Log error', e); }
+
+        console.log(logMsg);
+
+        if (!siteId || !url) {
+            console.error('[addSiteFile] Missing required fields');
+            return res.status(400).json({ message: 'Missing siteId or url' });
+        }
+
+        const siteIdInt = parseInt(siteId);
+        if (isNaN(siteIdInt)) {
+            return res.status(400).json({ message: 'Invalid Site ID' });
+        }
+
+        // Insert into task_messages with site_id, null task_id
+        const [result] = await db.query(`
+            INSERT INTO task_messages (site_id, task_id, sender_id, type, content, created_at)
+            VALUES (?, NULL, ?, ?, ?, NOW())
+        `, [siteIdInt, senderId, type, url]);
+
+        console.log('[addSiteFile] Insert result:', result);
+        try {
+            fs.appendFileSync('debug_controller.txt', `[addSiteFile] Insert ID: ${result.insertId}\n`);
+        } catch (e) { }
+
+        res.status(201).json({ message: 'File added successfully', fileId: result.insertId });
+    } catch (error) {
+        console.error('Error adding site file:', error);
+        try {
+            require('fs').appendFileSync('debug_controller.txt', `[addSiteFile] Error: ${error.message}\n`);
+        } catch (e) { }
+        res.status(500).json({ message: 'Error adding site file' });
     }
 };

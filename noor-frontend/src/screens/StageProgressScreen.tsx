@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
-    View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
-    TextInput, ActivityIndicator, Image, Modal, Platform, Alert, PermissionsAndroid, KeyboardAvoidingView
+    View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, StatusBar, Alert, ScrollView, Modal, TextInput, Platform, Image, KeyboardAvoidingView
 } from 'react-native';
+import ConfirmationModal from '../components/ConfirmationModal';
+import ImageViewerModal from '../components/ImageViewerModal';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio, Video, ResizeMode } from 'expo-av';
@@ -219,6 +219,31 @@ const ChatAudioItem = ({ uri, isMe }: { uri: string, isMe: boolean }) => {
 const StageProgressScreen = ({ route, navigation }: any) => {
     const { phaseId, taskId, siteName } = route.params || {};
     const { user } = useContext(AuthContext);
+
+    const [confirmModal, setConfirmModal] = useState({
+        visible: false,
+        title: '',
+        message: '',
+        onConfirm: () => { }
+    });
+
+    const confirmAction = (title: string, message: string, onConfirm: () => void) => {
+        setConfirmModal({
+            visible: true,
+            title,
+            message,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, visible: false }));
+                await onConfirm();
+            }
+        });
+    };
+
+    // Image Viewer State
+    const [imageViewerVisible, setImageViewerVisible] = useState(false);
+    const [viewerImages, setViewerImages] = useState<{ uri: string; id: string | number }[]>([]);
+    const [initialImageIndex, setInitialImageIndex] = useState(0);
+
     const [phase, setPhase] = useState<any>(null);
     const [todos, setTodos] = useState<any[]>([]);
     const [subTasks, setSubTasks] = useState<any[]>([]);
@@ -540,47 +565,65 @@ const StageProgressScreen = ({ route, navigation }: any) => {
 
         if (task.status === 'Completed' || task.status === 'waiting_for_approval') return; // Already done or pending
 
-        try {
-            // Submit progress as 100% to trigger approval workflow
-            await api.post(`/tasks/${task.id}/updates`, {
-                progress: 100,
-                note: 'Task marked as completed'
-            });
+        confirmAction(
+            "Confirm Completion",
+            "Are you sure you want to mark this task as complete?",
+            async () => {
+                try {
+                    // Submit progress as 100% to trigger approval workflow
+                    await api.post(`/tasks/${task.id}/updates`, {
+                        progress: 100,
+                        note: 'Task marked as completed'
+                    });
 
-            // Optimistic update
-            setSubTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'waiting_for_approval', progress: 100 } : t));
+                    // Optimistic update
+                    setSubTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'waiting_for_approval', progress: 100 } : t));
 
-            Alert.alert("Success", "Task submitted for admin approval");
-        } catch (error) {
-            console.error('Error completing task:', error);
-            Alert.alert("Error", "Failed to submit task for approval");
-        }
+                    Alert.alert("Success", "Task submitted for admin approval");
+                } catch (error) {
+                    console.error('Error completing task:', error);
+                    Alert.alert("Error", "Failed to submit task for approval");
+                }
+            }
+        );
     };
 
     const handleApproveTask = async (task: any) => {
-        try {
-            await api.put(`/tasks/${task.id}/approve`);
-            setSubTasks((prev: any[]) => prev.map(t => t.id === task.id ? { ...t, status: 'Completed' } : t));
-            // Also update main phase/task status for UI header
-            setPhase((prev: any) => ({ ...prev, status: 'Completed' }));
-            Alert.alert("Success", "Task approved and marked as completed.");
-        } catch (error) {
-            console.error('Error approving task:', error);
-            Alert.alert("Error", "Failed to approve task");
-        }
+        confirmAction(
+            "Confirm Approval",
+            "Are you sure you want to approve this completed task?",
+            async () => {
+                try {
+                    await api.put(`/tasks/${task.id}/approve`);
+                    setSubTasks((prev: any[]) => prev.map(t => t.id === task.id ? { ...t, status: 'Completed' } : t));
+                    // Also update main phase/task status for UI header
+                    setPhase((prev: any) => ({ ...prev, status: 'Completed' }));
+                    Alert.alert("Success", "Task approved and marked as completed.");
+                } catch (error) {
+                    console.error('Error approving task:', error);
+                    Alert.alert("Error", "Failed to approve task");
+                }
+            }
+        );
     };
 
     const handleRejectTask = async (task: any) => {
-        try {
-            await api.put(`/tasks/${task.id}/reject`, { reason: 'Admin requested changes' });
-            setSubTasks((prev: any[]) => prev.map(t => t.id === task.id ? { ...t, status: 'In Progress' } : t));
-            // Also update main phase/task status for UI header
-            setPhase((prev: any) => ({ ...prev, status: 'In Progress' }));
-            Alert.alert("Success", "Changes requested. Task reverted to In Progress.");
-        } catch (error) {
-            console.error('Error rejecting task:', error);
-            Alert.alert("Error", "Failed to reject task");
-        }
+        confirmAction(
+            "Confirm Rejection",
+            "Are you sure you want to reject this completed task?",
+            async () => {
+                try {
+                    await api.put(`/tasks/${task.id}/reject`, { reason: 'Admin requested changes' });
+                    setSubTasks((prev: any[]) => prev.map(t => t.id === task.id ? { ...t, status: 'In Progress' } : t));
+                    // Also update main phase/task status for UI header
+                    setPhase((prev: any) => ({ ...prev, status: 'In Progress' }));
+                    Alert.alert("Success", "Changes requested. Task reverted to In Progress.");
+                } catch (error) {
+                    console.error('Error rejecting task:', error);
+                    Alert.alert("Error", "Failed to reject task");
+                }
+            }
+        );
     };
 
     const handleMarkComplete = async () => {
@@ -593,58 +636,70 @@ const StageProgressScreen = ({ route, navigation }: any) => {
         // Prevent multiple submissions
         if (submitLoading) return;
 
-        try {
-            setSubmitLoading(true);
+        confirmAction(
+            "Confirm Completion",
+            "Are you sure you want to mark this task as complete?",
+            async () => {
+                try {
+                    setSubmitLoading(true);
 
-            if (taskId) {
-                // TASK MODE: Complete specific task
-                await api.put(`/tasks/${taskId}/complete`);
-            } else {
-                // PHASE MODE: Complete entire phase
-                // Submit as 100% complete for approval
-                await api.post(`/phases/${currentPhaseId}/updates`, {
-                    progress: 100
-                });
+                    if (taskId) {
+                        // TASK MODE: Complete specific task
+                        await api.put(`/tasks/${taskId}/complete`);
+                    } else {
+                        // PHASE MODE: Complete entire phase
+                        // Submit as 100% complete for approval
+                        await api.post(`/phases/${currentPhaseId}/updates`, {
+                            progress: 100
+                        });
+                    }
+
+                    setPhase((prev: any) => ({ ...prev, status: 'waiting_for_approval', progress: 100 }));
+                    Alert.alert("Success", "Work submitted for admin approval");
+
+                } catch (error) {
+                    console.error('Error marking complete:', error);
+                    Alert.alert("Error", "Failed to submit for approval");
+                } finally {
+                    setSubmitLoading(false);
+                }
             }
-
-            setPhase((prev: any) => ({ ...prev, status: 'waiting_for_approval', progress: 100 }));
-            Alert.alert("Success", "Work submitted for admin approval");
-
-        } catch (error) {
-            console.error('Error marking complete:', error);
-            Alert.alert("Error", "Failed to submit for approval");
-        } finally {
-            setSubmitLoading(false);
-        }
+        );
     };
 
     const handleApprove = async () => {
         const currentPhaseId = phaseId || phase?.id;
 
-        try {
-            if (taskId) {
-                // TASK MODE
-                await api.put(`/tasks/${taskId}/approve`);
-                Alert.alert("Success", "Task approved and marked as completed");
-            } else {
-                // PHASE MODE
-                if (!currentPhaseId) {
-                    Alert.alert("Error", "Phase ID not found");
-                    return;
+        confirmAction(
+            "Confirm Approval",
+            "Are you sure you want to approve this completed task?",
+            async () => {
+                try {
+                    if (taskId) {
+                        // TASK MODE
+                        await api.put(`/tasks/${taskId}/approve`);
+                        Alert.alert("Success", "Task approved and marked as completed");
+                    } else {
+                        // PHASE MODE
+                        if (!currentPhaseId) {
+                            Alert.alert("Error", "Phase ID not found");
+                            return;
+                        }
+                        await api.put(`/phases/${currentPhaseId}/approve`);
+                        Alert.alert("Success", "Phase approved and marked as completed");
+                    }
+
+                    // Common Success State Update
+                    setPhase((prev: any) => ({ ...prev, status: 'Completed', progress: 100 }));
+                    // Also update all subtasks to completed if needed/visual
+                    fetchData();
+
+                } catch (error) {
+                    console.error('Error approving:', error);
+                    Alert.alert("Error", "Failed to approve");
                 }
-                await api.put(`/phases/${currentPhaseId}/approve`);
-                Alert.alert("Success", "Phase approved and marked as completed");
             }
-
-            // Common Success State Update
-            setPhase((prev: any) => ({ ...prev, status: 'Completed', progress: 100 }));
-            // Also update all subtasks to completed if needed/visual
-            fetchData();
-
-        } catch (error) {
-            console.error('Error approving:', error);
-            Alert.alert("Error", "Failed to approve");
-        }
+        );
     };
 
     const handleReject = () => {
@@ -834,6 +889,29 @@ const StageProgressScreen = ({ route, navigation }: any) => {
         return status?.replace('_', ' ') || 'In Progress';
     };
 
+    const handleImageClick = (imageUrl: string) => {
+        // Collect all images from the current feed (messages + updates if they have images)
+        // For now, simpler to just filter from 'messages' state as updates typically don't have user images yet
+        // If updates eventually have images, combine them.
+
+        const allImagesInChat = messages
+            .filter(m => m.type === 'image' && m.media_url)
+            .map(m => ({
+                id: m.id,
+                uri: (api.defaults.baseURL?.replace('/api', '') || '') + m.media_url
+            }));
+
+        // Find index of clicked image
+        const fullUri = (api.defaults.baseURL?.replace('/api', '') || '') + imageUrl;
+        const index = allImagesInChat.findIndex(img => img.uri === fullUri);
+
+        if (index !== -1) {
+            setViewerImages(allImagesInChat);
+            setInitialImageIndex(index);
+            setImageViewerVisible(true);
+        }
+    };
+
     const renderFeed = () => {
         const feed = [
             ...updates.map(u => ({ ...u, itemType: 'update' })),
@@ -882,11 +960,13 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                             <View>
                                 <View style={{ borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
                                     {item.type === 'image' && (
-                                        <Image
-                                            source={{ uri: (api.defaults.baseURL?.replace('/api', '') || '') + item.media_url }}
-                                            style={{ width: 220, height: 220, backgroundColor: '#EEE' }}
-                                            resizeMode="cover"
-                                        />
+                                        <TouchableOpacity onPress={() => handleImageClick(item.media_url)}>
+                                            <Image
+                                                source={{ uri: (api.defaults.baseURL?.replace('/api', '') || '') + item.media_url }}
+                                                style={{ width: 220, height: 220, backgroundColor: '#EEE' }}
+                                                resizeMode="cover"
+                                            />
+                                        </TouchableOpacity>
                                     )}
                                     {item.type === 'video' && (
                                         <Video
@@ -1168,13 +1248,6 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                                             task.status === 'Completed' || task.status === 'Approved' ? (
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                                     <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                                                    <Text style={{
-                                                        color: '#10B981',
-                                                        fontWeight: '700',
-                                                        fontSize: 12
-                                                    }}>
-                                                        Done
-                                                    </Text>
                                                 </View>
                                             ) :
                                                 // 4. Mark Complete Button (Default)
@@ -1440,6 +1513,22 @@ const StageProgressScreen = ({ route, navigation }: any) => {
                     </View>
                 </View>
             </Modal>
+
+            <ConfirmationModal
+                visible={confirmModal.visible}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+            />
+
+            <ImageViewerModal
+                visible={imageViewerVisible}
+                images={viewerImages}
+                initialIndex={initialImageIndex}
+                onClose={() => setImageViewerVisible(false)}
+            />
+
             {/* Change Request Modal */}
             <Modal
                 visible={changeRequestModalVisible}

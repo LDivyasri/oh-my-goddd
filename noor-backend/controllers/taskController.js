@@ -200,8 +200,8 @@ exports.approveTask = async (req, res) => {
             // Add system message to chat
             await db.query(`
                 INSERT INTO task_messages (task_id, sender_id, type, content)
-                VALUES (?, NULL, 'system', '✅ Good work! Task approved and completed by admin.')
-            `, [taskId]);
+                VALUES (?, ?, 'system', '✅ Good work! Task approved and completed by admin.')
+            `, [taskId, adminId]);
         }
 
         res.json({ message: 'Task approved' });
@@ -246,8 +246,8 @@ exports.rejectTask = async (req, res) => {
             // Add system message to chat
             await db.query(`
                 INSERT INTO task_messages (task_id, sender_id, type, content)
-                VALUES (?, NULL, 'system', ?)
-            `, [taskId, reason ? `Changes requested: ${reason}` : 'Changes requested by Admin.']);
+                VALUES (?, ?, 'system', ?)
+            `, [taskId, adminId, reason ? `Changes requested: ${reason}` : 'Changes requested by Admin.']);
         }
 
         res.json({ message: 'Changes requested' });

@@ -16,6 +16,7 @@ import StageProgressScreen from '../screens/StageProgressScreen';
 import EmployeeProjectDetailsScreen from '../screens/EmployeeProjectDetailsScreen';
 import EmployeeManagementScreen from '../screens/EmployeeManagementScreen';
 import EmployeeProfileScreen from '../screens/EmployeeProfileScreen';
+import CompletedTasksScreen from '../screens/CompletedTasksScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -52,10 +53,11 @@ const AppNavigator: React.FC = () => {
                     <>
                         <Stack.Screen name="EmployeeDashboard" component={EmployeeDashboardScreen} />
                         <Stack.Screen name="EmployeeTasks" component={EmployeeTasksScreen} />
-                    <Stack.Screen name="EmployeeTaskDetail" component={EmployeeTaskDetailScreen} />
+                        <Stack.Screen name="EmployeeTaskDetail" component={EmployeeTaskDetailScreen} />
                         <Stack.Screen name="StageProgress" component={StageProgressScreen} />
                         <Stack.Screen name="EmployeeProjectDetails" component={EmployeeProjectDetailsScreen} />
                         <Stack.Screen name="EmployeeProfile" component={EmployeeProfileScreen} />
+                        <Stack.Screen name="CompletedTasks" component={CompletedTasksScreen} />
                     </>
                 )}
             </Stack.Navigator>

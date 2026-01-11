@@ -14,6 +14,7 @@ router.get('/sites', verifyToken, siteController.getAllSites);
 router.post('/sites', verifyToken, siteController.createSite);
 router.get('/sites/:id', verifyToken, siteController.getSiteWithPhases);
 router.get('/sites/:siteId/files', verifyToken, siteController.getSiteFiles); // New Files Route
+router.post('/sites/:siteId/files', verifyToken, siteController.addSiteFile); // Upload File Record
 router.put('/sites/:id', verifyToken, siteController.updateSite);
 router.delete('/sites/:id', verifyToken, siteController.deleteSite);
 
@@ -78,5 +79,12 @@ router.get('/sites/:siteId/materials', verifyToken, materialController.getMateri
 router.get('/materials', verifyToken, materialController.getAllMaterialRequests); // Get all (Admin)
 router.put('/materials/:id/status', verifyToken, materialController.updateMaterialRequestStatus); // Approve/Reject
 router.put('/materials/:id/received', verifyToken, materialController.markMaterialReceived); // Mark Received
+
+// Transaction Routes
+const transactionController = require('../controllers/transactionController');
+router.get('/sites/:projectId/transactions', verifyToken, transactionController.getProjectTransactions);
+router.post('/sites/:projectId/transactions', verifyToken, transactionController.addTransaction);
+router.put('/phases/:phaseId/budget', verifyToken, transactionController.updatePhaseBudget);
+router.get('/sites/:projectId/phases/financials', verifyToken, transactionController.getPhaseFinancials);
 
 module.exports = router;

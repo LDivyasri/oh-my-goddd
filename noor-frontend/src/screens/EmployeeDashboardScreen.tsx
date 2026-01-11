@@ -262,6 +262,7 @@ const EmployeeDashboardScreen = () => {
                         icon="checkmark-done-circle-outline"
                         color="#388E3C"
                         count={stats.completed}
+                        onPress={() => navigation.navigate('CompletedTasks')}
                     />
                     <StatusBox
                         label="Active Sites"
