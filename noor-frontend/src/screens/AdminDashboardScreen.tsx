@@ -1940,7 +1940,7 @@ const AdminDashboardScreen = () => {
 
                                     {/* File Type Tabs */}
                                     <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
-                                        {['Media', 'Voice', 'Documents', 'Links'].map(tab => (
+                                        {['Media'].map(tab => (
                                             <TouchableOpacity
                                                 key={tab}
                                                 style={{
@@ -2107,14 +2107,7 @@ const AdminDashboardScreen = () => {
                             onChangeText={setNewPhaseName}
                             autoFocus={true}
                         />
-                        <Text style={styles.miniModalLabel}>Serial Number (S.No)</Text>
-                        <TextInput
-                            style={styles.miniModalInput}
-                            placeholder={`Default: ${projectPhases.length + 1}`}
-                            value={newPhaseSNo}
-                            onChangeText={setNewPhaseSNo}
-                            keyboardType="number-pad"
-                        />
+
                         <View style={styles.miniModalActions}>
                             <TouchableOpacity
                                 style={[styles.miniModalBtn, styles.miniModalCancelBtn]}
@@ -2801,18 +2794,7 @@ const AdminDashboardScreen = () => {
                                     <Text style={{ fontSize: 12, color: '#64748b' }}>Project Value: QAR {(parseFloat(formData.budget) || 0).toLocaleString()} • {settingsPhases.length} Stages</Text>
                                 </View>
                                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                                    <TouchableOpacity
-                                        style={{
-                                            backgroundColor: '#f1f5f9',
-                                            paddingHorizontal: 12,
-                                            paddingVertical: 8,
-                                            borderRadius: 8,
-                                            justifyContent: 'center'
-                                        }}
-                                        onPress={() => setSitePickerVisible(true)}
-                                    >
-                                        <Ionicons name="swap-horizontal" size={18} color="#64748b" />
-                                    </TouchableOpacity>
+
                                     <TouchableOpacity
                                         style={{
                                             backgroundColor: '#166534',

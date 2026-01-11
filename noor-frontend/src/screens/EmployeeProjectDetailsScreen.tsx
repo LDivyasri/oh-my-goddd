@@ -247,7 +247,7 @@ const EmployeeProjectDetailsScreen = ({ route, navigation }: any) => {
                                                             {phase.name}
                                                         </Text>
                                                         <Text style={phase.status === 'Completed' ? styles.phaseSubtitleCompleted : styles.phaseSubtitleLight}>
-                                                            {completedTasks}/{totalTasks} Completed · {progress}% · ₹{(phase.used_amount || 0).toLocaleString('en-IN')} / ₹{(phase.budget || 0).toLocaleString('en-IN')}
+                                                            {completedTasks}/{totalTasks} Completed · {progress}%
                                                         </Text>
                                                     </View>
 
