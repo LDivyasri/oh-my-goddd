@@ -46,6 +46,11 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
     // Phase Usage Stats (derived or fetched)
     const [phaseUsage, setPhaseUsage] = useState<Record<number, number>>({});
 
+    // NEW: Phase Details View State
+    const [viewPhaseId, setViewPhaseId] = useState<number | null>(null);
+    const [viewPhaseTransactions, setViewPhaseTransactions] = useState<Transaction[]>([]);
+
+
     const fetchTransactions = useCallback(async () => {
         setLoading(true);
         try {
@@ -75,17 +80,86 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
     }, [fetchTransactions]);
 
     const submitTransaction = async () => {
+        // Legacy wrapper for the Warning Modal Proceed button which respects state
+        await submitTransactionWithArgs({
+            type,
+            amount: Number(amount),
+            description,
+            phase_id: selectedPhaseId,
+            date,
+            payment_method: type === 'IN' ? paymentMethod : null
+        });
+    };
+
+    const handleAddTransaction = async (overridePhaseId?: number) => {
+        if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+            Alert.alert('Error', 'Please enter a valid amount');
+            return;
+        }
+
+        // Use overridePhaseId if provided, else selectedPhaseId
+        const activePhaseId = overridePhaseId || selectedPhaseId;
+
+        // If 'viewPhaseId' is active (in details view), we enforce it as the activePhaseId
+        const finalPhaseId = viewPhaseId || activePhaseId;
+
+        if (type === 'OUT' && !finalPhaseId) {
+            Alert.alert('Error', 'Please select a phase for expenses');
+            return;
+        }
+
+        // Set the state just in case, for submitTransaction to pick up if it relies on state 
+        // (Note: submitTransaction reads from state, so we must set it. 
+        // Since setState is async, we should probably modify submitTransaction to take args, 
+        // but for now we will assume submitTransaction reads the LATEST state if we trigger it or use args.)
+        // ACTUALLY: submitTransaction uses `selectedPhaseId` from closure/state. 
+        // We need to update state and then call submit, OR refactor submitTransaction.
+        // Let's Refactor submitTransaction slightly to accept optional args.
+
+        await submitTransactionWithArgs({
+            type,
+            amount: Number(amount),
+            description,
+            phase_id: finalPhaseId, // This allows IN payments to have a phase too
+            date,
+            payment_method: type === 'IN' ? paymentMethod : null
+        });
+    };
+
+    const submitTransactionWithArgs = async (data: any) => {
         try {
-            await api.post(`/sites/${siteId}/transactions`, {
-                type,
-                amount: Number(amount),
-                description,
-                phase_id: selectedPhaseId,
-                date,
-                payment_method: type === 'IN' ? paymentMethod : null
-            });
+            // Budget Check logic moved here for safety if phase is present
+            if (data.type === 'OUT' && data.phase_id) {
+                const phase = phases.find(p => p.id == data.phase_id);
+                const budget = Number(phase?.budget) || 0;
+                const used = phaseUsage[data.phase_id] || 0;
+                const newTotal = used + Number(data.amount);
+
+                // If budget check fails, we stop (unless user confirms logic is added differently)
+                // For simplicity, reusing warning logic is tricky with args. 
+                // We'll skip complex warning for the inline "safe" version or implement a quick check.
+                if (budget > 0 && newTotal > budget) {
+                    // We need to show modal. But modal uses state. 
+                    // We can set state variables and show modal, effectively "pausing" this function.
+                    // But we can't easily resume with args.
+                    // IMPORTANT: The existing warning logic relies on state.
+                    // We will set the state values so the warning modal can pick them up if needed.
+                    setSelectedPhaseId(data.phase_id);
+
+                    setWarningMessage({
+                        title: 'Budget Exceeded',
+                        details: `This transaction will exceed the phase budget.\n\nBudget: ${formatMoney(budget)}\nUsed: ${formatMoney(used)}`,
+                        newTotal: `New Total: ${formatMoney(newTotal)}`
+                    });
+                    setWarningModalVisible(true);
+                    return;
+                }
+            }
+
+            await api.post(`/sites/${siteId}/transactions`, data);
+
             Alert.alert('Success', 'Transaction added successfully');
-            setAddModalVisible(false);
+            setAddModalVisible(false); // Close global modal if open
             resetForm();
             fetchTransactions();
         } catch (error: any) {
@@ -94,49 +168,13 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
         }
     };
 
-    const handleAddTransaction = async () => {
-        if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-            Alert.alert('Error', 'Please enter a valid amount');
-            return;
-        }
-        if (type === 'OUT' && !selectedPhaseId) {
-            Alert.alert('Error', 'Please select a phase for expenses');
-            return;
-        }
-
-        if (type === 'OUT' && selectedPhaseId) {
-            // Use loose equality to handle potential string/number mismatch
-            const phase = phases.find(p => p.id == selectedPhaseId);
-            const budget = Number(phase?.budget) || 0;
-            const used = phaseUsage[selectedPhaseId] || 0;
-            const newTotal = used + Number(amount);
-
-            console.log('--- Budget Check Debug ---');
-            console.log('Phase ID:', selectedPhaseId);
-            console.log('Found Phase:', phase?.name);
-            console.log('Budget:', budget);
-            console.log('Used:', used);
-            console.log('New Total:', newTotal);
-
-            if (budget > 0 && newTotal > budget) {
-                // Show custom modal instead of window.confirm
-                setWarningMessage({
-                    title: 'Budget Exceeded',
-                    details: `This transaction will exceed the phase budget.\n\nBudget: ${formatMoney(budget)}\nUsed: ${formatMoney(used)}`,
-                    newTotal: `New Total: ${formatMoney(newTotal)}`
-                });
-                setWarningModalVisible(true);
-                return;
-            }
-        }
-
-        submitTransaction();
-    };
-
     const resetForm = () => {
         setAmount('');
         setDescription('');
-        setSelectedPhaseId(null);
+        // If we are in a specific phase view, keep that phase selected, otherwise clear it
+        if (!viewPhaseId) {
+            setSelectedPhaseId(null);
+        }
         setDate(new Date().toISOString().split('T')[0]);
         setType('OUT');
         setPaymentMethod('Cash');
@@ -162,6 +200,91 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
         </View>
     );
 
+    // --- NEW: Render Phase Details Page ---
+    const renderPhaseDetails = () => {
+        const phase = phases.find(p => p.id === viewPhaseId);
+        if (!phase) return null;
+
+        const budget = Number(phase.budget) || 0;
+        const used = phaseUsage[phase.id] || 0;
+        const remaining = budget - used;
+        const isOver = used > budget;
+
+        // Filter transactions for this phase
+        const pTrans = transactions.filter(t => t.phase_id === phase.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        return (
+            <View style={styles.container}>
+                {/* Header Section */}
+                <View style={styles.phaseDetailHeader}>
+                    <TouchableOpacity onPress={() => setViewPhaseId(null)} style={styles.backButton}>
+                        <Ionicons name="arrow-back" size={24} color="#374151" />
+                        <Text style={styles.backButtonText}>Back to Dashboard</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.phaseDetailTitle}>{phase.name}</Text>
+
+                    <View style={styles.phaseDetailStatsRow}>
+                        <View style={styles.phaseStatBox}>
+                            <Text style={styles.statLabel}>Total Budget</Text>
+                            <Text style={[styles.statValue, { color: '#166534' }]}>{formatMoney(budget)}</Text>
+                        </View>
+                        <View style={styles.phaseStatBox}>
+                            <Text style={styles.statLabel}>Total Used (OUT)</Text>
+                            <Text style={[styles.statValue, { color: isOver ? '#DC2626' : '#EA580C' }]}>{formatMoney(used)}</Text>
+                        </View>
+                        <View style={styles.phaseStatBox}>
+                            <Text style={styles.statLabel}>Remaining</Text>
+                            <Text style={[styles.statValue, { color: remaining < 0 ? '#DC2626' : '#2563EB' }]}>{formatMoney(remaining)}</Text>
+                        </View>
+                    </View>
+                </View>
+
+                <ScrollView style={styles.contentScroll}>
+
+
+                    {/* Transactions List */}
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Transactions History</Text>
+                        {pTrans.length === 0 ? (
+                            <Text style={styles.emptyText}>No transactions for this phase.</Text>
+                        ) : (
+                            pTrans.map(item => (
+                                <View key={item.id} style={styles.transactionRow}>
+                                    <View style={[styles.iconBox, { backgroundColor: item.type === 'IN' ? '#DCFCE7' : '#FEE2E2' }]}>
+                                        <Ionicons
+                                            name={item.type === 'IN' ? 'arrow-down' : 'arrow-up'}
+                                            size={20}
+                                            color={item.type === 'IN' ? '#166534' : '#DC2626'}
+                                        />
+                                    </View>
+                                    <View style={styles.transInfo}>
+                                        <Text style={styles.transDesc}>{item.description}</Text>
+                                        <View style={styles.transMeta}>
+                                            <Text style={styles.transDate}>{formatDate(item.date)}</Text>
+                                            <Text style={styles.transPhase}> • {phase.name}</Text>
+                                            {item.type === 'IN' && <Text style={[styles.transPhase, { color: '#166534' }]}> • Payment In</Text>}
+                                            {item.type === 'OUT' && <Text style={[styles.transPhase, { color: '#DC2626' }]}> • Expense</Text>}
+                                        </View>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                        <Text style={[styles.transAmount, { color: item.type === 'IN' ? '#166534' : '#DC2626' }]}>
+                                            {item.type === 'IN' ? '+' : '-'} {formatMoney(item.amount)}
+                                        </Text>
+                                        <Text style={{ fontSize: 10, color: '#6B7280' }}>{item.created_by_name || 'Admin'}</Text>
+                                    </View>
+                                </View>
+                            ))
+                        )}
+                    </View>
+                </ScrollView>
+            </View>
+        );
+    };
+
+    if (viewPhaseId) {
+        return renderPhaseDetails();
+    }
+
     return (
         <View style={styles.container}>
             {/* Summary Cards */}
@@ -174,7 +297,7 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
             {/* Main Content: Phase Budgets & Transaction List */}
             <ScrollView style={styles.contentScroll}>
 
-                {/* Phase Budgets (Only for Admin - Assuming this view is primarily admin for now or read-only emp) */}
+                {/* Phase Budgets */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Phase Budgets</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.phaseScroll}>
@@ -185,7 +308,11 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
                             const isOver = used > budget;
 
                             return (
-                                <View key={phase.id} style={styles.phaseCard}>
+                                <TouchableOpacity
+                                    key={phase.id}
+                                    style={styles.phaseCard}
+                                    onPress={() => setViewPhaseId(phase.id)}
+                                >
                                     <Text style={styles.phaseName} numberOfLines={1}>{phase.name}</Text>
                                     <View style={styles.progressBarBg}>
                                         <View style={[
@@ -197,7 +324,7 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
                                         <Text style={styles.phaseStatText}>{formatMoney(used)} used</Text>
                                         <Text style={styles.phaseStatText}>of {formatMoney(budget)}</Text>
                                     </View>
-                                </View>
+                                </TouchableOpacity>
                             );
                         })}
                     </ScrollView>
@@ -207,7 +334,6 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Recent Transactions</Text>
-                        {/* Add Button Removed - Replaced with Payment Actions below */}
                     </View>
 
                     {!readonly && (
@@ -260,7 +386,7 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
                 </View>
             </ScrollView>
 
-            {/* Add Transaction Modal */}
+            {/* Add Transaction Modal (Global) */}
             <Modal
                 visible={addModalVisible}
                 transparent={true}
@@ -277,8 +403,6 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
                                 <Ionicons name="close" size={24} color="#374151" />
                             </TouchableOpacity>
                         </View>
-
-                        {/* Type Selector Removed - controlled by entry buttons */}
 
                         <Text style={styles.label}>Amount</Text>
                         <TextInput
@@ -384,7 +508,7 @@ const ProjectTransactions: React.FC<ProjectTransactionsProps> = ({ siteId, phase
                             onChangeText={setDescription}
                         />
 
-                        <TouchableOpacity style={styles.saveBtn} onPress={handleAddTransaction}>
+                        <TouchableOpacity style={styles.saveBtn} onPress={() => handleAddTransaction()}>
                             <Text style={styles.saveBtnText}>Save Transaction</Text>
                         </TouchableOpacity>
 
@@ -865,7 +989,72 @@ const styles = StyleSheet.create({
     warningProceedText: {
         color: '#FFF',
         fontWeight: '600',
-    }
+    },
+    // Detail Page Styles
+    phaseDetailHeader: {
+        marginBottom: 20,
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    backButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    backButtonText: {
+        marginLeft: 8,
+        fontSize: 16,
+        color: '#374151',
+        fontWeight: '600',
+    },
+    phaseDetailTitle: {
+        fontSize: 22,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 16,
+    },
+    phaseDetailStatsRow: {
+        flexDirection: 'row',
+        gap: 12,
+        flexWrap: 'wrap'
+    },
+    phaseStatBox: {
+        flex: 1,
+        minWidth: 100,
+        backgroundColor: '#F9FAFB',
+        padding: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    statLabel: {
+        fontSize: 12,
+        color: '#6B7280',
+        marginBottom: 4,
+        textTransform: 'uppercase',
+    },
+    statValue: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#111827',
+    },
+    inlineFormSection: {
+        backgroundColor: '#fff',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        marginBottom: 24,
+    },
+    inlineFormTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#8B0000',
+        marginBottom: 16,
+    },
 });
 
 export default ProjectTransactions;
