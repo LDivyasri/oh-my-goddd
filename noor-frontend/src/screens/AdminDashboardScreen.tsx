@@ -975,7 +975,7 @@ const AdminDashboardScreen = () => {
                                 borderRadius: 20,
                                 backgroundColor: filterSiteId === 'all' ? '#059669' : '#E5E7EB',
                             }}
-                            onPress={() => { setFilterSiteId('all'); fetchCompletedTasksList(completedTaskFilter, 'all', filterDate); }}
+                            onPress={() => { setFilterSiteId('all'); fetchCompletedTasksList(completedTaskFilter, 'all', dateRange); }}
                         >
                             <Text style={{ fontSize: 13, fontWeight: '500', color: filterSiteId === 'all' ? '#fff' : '#374151' }}>All Projects</Text>
                         </TouchableOpacity>
@@ -988,7 +988,7 @@ const AdminDashboardScreen = () => {
                                     borderRadius: 20,
                                     backgroundColor: filterSiteId === site.id ? '#059669' : '#E5E7EB',
                                 }}
-                                onPress={() => { setFilterSiteId(site.id); fetchCompletedTasksList(completedTaskFilter, site.id, filterDate); }}
+                                onPress={() => { setFilterSiteId(site.id); fetchCompletedTasksList(completedTaskFilter, site.id, dateRange); }}
                             >
                                 <Text style={{ fontSize: 13, fontWeight: '500', color: filterSiteId === site.id ? '#fff' : '#374151' }}>{site.name}</Text>
                             </TouchableOpacity>
@@ -2640,7 +2640,7 @@ Project Team`;
                                         onPress={() => { setActiveTab('Completed'); fetchCompletedTasksList(completedTaskFilter); }}
                                         activeOpacity={0.7}
                                     >
-                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 8 : 0 }}>
                                             <Text style={[styles.metricLabel, { marginBottom: 0 }]}>Completed Tasks</Text>
                                             <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 8, padding: 3 }}>
                                                 {['day', 'week', 'month', 'year'].map((f) => (
