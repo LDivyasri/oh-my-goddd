@@ -57,7 +57,11 @@ exports.getAllSites = async (req, res) => {
         const [sites] = await db.query(`
             SELECT s.*, 
                    (SELECT COUNT(*) FROM phases WHERE site_id = s.id) as phase_count,
-                   (SELECT COUNT(*) FROM tasks WHERE site_id = s.id) as task_count
+                   (SELECT COUNT(*) FROM tasks WHERE site_id = s.id) as task_count,
+                   (
+                       (SELECT COUNT(*) FROM tasks WHERE site_id = s.id AND (LOWER(status) = 'waiting approval' OR LOWER(status) = 'waiting_for_approval')) +
+                       (SELECT COUNT(*) FROM material_requests WHERE site_id = s.id AND status = 'Pending')
+                   ) as pending_approvals_count
             FROM sites s
             ORDER BY s.created_at DESC
         `);

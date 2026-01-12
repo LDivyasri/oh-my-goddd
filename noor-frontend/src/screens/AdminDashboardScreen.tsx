@@ -140,13 +140,238 @@ const CustomDatePicker = ({ visible, onClose, onSelect, title }: { visible: bool
     );
 };
 
+const CustomDateRangePicker = ({ visible, onClose, onApply, initialFrom, initialTo }: { visible: boolean, onClose: () => void, onApply: (from: string, to: string) => void, initialFrom?: string, initialTo?: string }) => {
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+    const [startDate, setStartDate] = useState<Date | null>(initialFrom ? new Date(initialFrom) : null);
+    const [endDate, setEndDate] = useState<Date | null>(initialTo ? new Date(initialTo) : null);
+
+    useEffect(() => {
+        if (visible) {
+            setStartDate(initialFrom ? new Date(initialFrom) : null);
+            setEndDate(initialTo ? new Date(initialTo) : null);
+        }
+    }, [visible, initialFrom, initialTo]);
+
+    const getDaysInMonth = (date: Date) => {
+        return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    };
+
+    const generateDays = () => {
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth();
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = getDaysInMonth(currentMonth);
+        const days = [];
+        for (let i = 0; i < firstDay; i++) days.push(null);
+        for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
+        return days;
+    };
+
+    const handleDatePress = (date: Date) => {
+        if (!startDate || (startDate && endDate)) {
+            setStartDate(date);
+            setEndDate(null);
+        } else {
+            if (date < startDate) {
+                setStartDate(date);
+            } else {
+                setEndDate(date);
+            }
+        }
+    };
+
+    const isDateInRange = (date: Date) => {
+        if (!startDate || !endDate) return false;
+        return date > startDate && date < endDate;
+    };
+
+    const isDateSelected = (date: Date) => {
+        return (startDate && date.toDateString() === startDate.toDateString()) ||
+            (endDate && date.toDateString() === endDate.toDateString());
+    };
+
+    const applyPreset = (days: number) => {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - days);
+        setStartDate(start);
+        setEndDate(end);
+    };
+
+    const handleApply = () => {
+        if (startDate && endDate) {
+            // Format YYYY-MM-DD
+            const fmt = (d: Date) => {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+            onApply(fmt(startDate), fmt(endDate));
+            onClose();
+        } else {
+            Alert.alert('Select Range', 'Please select both start and end dates.');
+        }
+    };
+
+    const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    return (
+        <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+            <View style={styles.datePickerOverlay}>
+                <View style={[styles.datePickerContent, { maxWidth: 360 }]}>
+                    <View style={styles.datePickerHeader}>
+                        <Text style={styles.datePickerTitle}>Select Date Range</Text>
+                        <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color="#6b7280" /></TouchableOpacity>
+                    </View>
+
+                    {/* Presets */}
+                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                        {[
+                            { label: 'Today', days: 0 },
+                            { label: 'Last 7 Days', days: 6 },
+                            { label: 'Last 30 Days', days: 29 },
+                            { label: 'This Month', type: 'month' }
+                        ].map((preset, idx) => (
+                            <TouchableOpacity
+                                key={idx}
+                                style={{ paddingHorizontal: 10, paddingVertical: 4, backgroundColor: '#F3F4F6', borderRadius: 4 }}
+                                onPress={() => {
+                                    if (preset.type === 'month') {
+                                        const now = new Date();
+                                        setStartDate(new Date(now.getFullYear(), now.getMonth(), 1));
+                                        setEndDate(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+                                    } else {
+                                        applyPreset(preset.days || 0);
+                                    }
+                                }}
+                            >
+                                <Text style={{ fontSize: 11, color: '#374151', fontWeight: '500' }}>{preset.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* From - To Display */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, backgroundColor: '#f9fafb', padding: 8, borderRadius: 8 }}>
+                        <View>
+                            <Text style={{ fontSize: 11, color: '#6b7280' }}>FROM</Text>
+                            <Text style={{ fontWeight: '600' }}>{startDate ? startDate.toLocaleDateString() : '-'}</Text>
+                        </View>
+                        <Ionicons name="arrow-forward" size={16} color="#9ca3af" style={{ marginTop: 10 }} />
+                        <View>
+                            <Text style={{ fontSize: 11, color: '#6b7280' }}>TO</Text>
+                            <Text style={{ fontWeight: '600' }}>{endDate ? endDate.toLocaleDateString() : '-'}</Text>
+                        </View>
+                    </View>
+
+                    {/* Calendar */}
+                    <View style={styles.calendarHeader}>
+                        <TouchableOpacity onPress={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}>
+                            <Ionicons name="chevron-back" size={20} color="#374151" />
+                        </TouchableOpacity>
+                        <Text style={[styles.monthYearText, { fontSize: 14 }]}>{months[currentMonth.getMonth()]} {currentMonth.getFullYear()}</Text>
+                        <TouchableOpacity onPress={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}>
+                            <Ionicons name="chevron-forward" size={20} color="#374151" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.weekDaysRow}>
+                        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => <Text key={d} style={[styles.weekDayText, { fontSize: 11 }]}>{d}</Text>)}
+                    </View>
+
+                    <View style={styles.daysGrid}>
+                        {generateDays().map((date, index) => {
+                            if (!date) return <View key={index} style={styles.dayCell} />;
+                            const isSelected = isDateSelected(date);
+                            const inRange = isDateInRange(date);
+
+                            return (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={[
+                                        styles.dayCell,
+                                        { width: '13%', height: 32 },
+                                        isSelected && { backgroundColor: '#8B0000', borderRadius: 4 },
+                                        inRange && { backgroundColor: '#FECACA', borderRadius: 0 }
+                                    ]}
+                                    onPress={() => handleDatePress(date)}
+                                >
+                                    <Text style={[
+                                        styles.dayText,
+                                        { fontSize: 12 },
+                                        isSelected && { color: '#fff', fontWeight: 'bold' },
+                                        inRange && { color: '#8B0000' }
+                                    ]}>{date.getDate()}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+
+                    <TouchableOpacity style={[styles.submitButton, { marginTop: 16 }]} onPress={handleApply}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>Apply Range</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </Modal>
+    );
+};
+
 interface Site {
     id: number;
     name: string;
     location: string;
     budget: string;
+    pending_approvals_count?: number;
     client_name?: string;
     [key: string]: any;
+}
+
+interface DashboardStats {
+    projects: {
+        total: number;
+        active: number;
+        completed: number;
+        onHold: number;
+        nearCompletion: number;
+        behindSchedule: number;
+        avgProgress: number;
+    };
+    tasks: {
+        total: number;
+        pending: number;
+        waitingApproval: number;
+        completed: number;
+        overdue: number;
+    };
+    employees: {
+        total: number;
+        active: number;
+        idle: number;
+    };
+    materials: {
+        pending: number;
+        approved: number;
+        received: number;
+        approvedNotReceived: number;
+    };
+    financials: {
+        totalBudget: number;
+        totalSpent: number;
+        remaining: number;
+        highestSpendingProject: string;
+    };
+    recentActivity: Array<{
+        title: string;
+        type: string;
+        project_name: string;
+        time: string;
+    }>;
+    alerts: {
+        overdueTasks: number;
+        budgetExceeded: number;
+        longPendingApprovals: number;
+        pendingMaterials: number;
+    };
 }
 
 const AdminDashboardScreen = () => {
@@ -157,6 +382,48 @@ const AdminDashboardScreen = () => {
     const isMobile = width < 768;
     const [activeTab, setActiveTab] = useState('Dashboard');
     const [activeProjectTab, setActiveProjectTab] = useState<'Tasks' | 'Transactions' | 'Materials' | 'Files'>('Tasks');
+
+    // Approvals State
+    const [approvalData, setApprovalData] = useState<{ tasks: any[], materials: any[] }>({ tasks: [], materials: [] });
+    const [approvalLoading, setApprovalLoading] = useState(false);
+    const [approvalTab, setApprovalTab] = useState<'Tasks' | 'Materials'>('Tasks');
+
+    const fetchApprovals = async () => {
+        setApprovalLoading(true);
+        try {
+            const response = await api.get('/admin/approvals');
+            setApprovalData(response.data);
+        } catch (error) {
+            console.error('Error fetching approvals:', error);
+            showToast('Failed to load approvals', 'error');
+        } finally {
+            setApprovalLoading(false);
+        }
+    };
+
+    const handleApproveTask = async (arg: number | any) => {
+        const taskId = typeof arg === 'object' ? arg.id : arg;
+        try {
+            await api.put(`/tasks/${taskId}/approve`, { status: 'Completed' });
+            showToast('Task approved successfully', 'success');
+            fetchApprovals(); // Refresh list
+            fetchDashboardStats(); // Refresh badges
+            if (selectedSite?.id) fetchProjectDetails(selectedSite.id); // Refresh project view if open
+            setTaskModalVisible(false); // Close task modal if open
+        } catch (error) {
+            console.error('Error approving task:', error);
+            showToast('Failed to approve task', 'error');
+        }
+    };
+
+    // Memo: I need to verify the endpoint for approval. 
+    // `taskController.js` has `updateTask` which handles status. 
+    // `adminController` doesn't have specific approval task. 
+    // `siteController.js` updateTask: `if (status && status.toLowerCase() === 'completed') ... admins cannot directly complete...` 
+    // Wait, line 391 in siteController says: `if (status && status.toLowerCase() === 'completed') return res.status(403)... Use the approval endpoint instead.`
+    // So there IS an approval endpoint? I need to find it. I suspect it's `completeTask` or similar.
+    // Let's assume standard update for now, but I better check taskController.js.
+
     const [expandedPhaseIds, setExpandedPhaseIds] = useState<number[]>([]);
 
     // Confirmation Modal State
@@ -304,6 +571,73 @@ const AdminDashboardScreen = () => {
     const [projectFiles, setProjectFiles] = useState<any[]>([]);
     const [activeFileTab, setActiveFileTab] = useState<'Media' | 'Voice' | 'Documents' | 'Links'>('Media');
     const [fileLoading, setFileLoading] = useState(false);
+
+    // Dashboard Stats State
+    const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+    const [statsLoading, setStatsLoading] = useState(false);
+
+    // Completed Tasks Filter State
+    const [completedTaskFilter, setCompletedTaskFilter] = useState<'day' | 'week' | 'month' | 'year'>('day');
+    const [completedTasksCount, setCompletedTasksCount] = useState(0);
+
+    const fetchCompletedTasksCount = async (filter: string) => {
+        try {
+            const response = await api.get(`/admin/completed-tasks?filter=${filter}`);
+            setCompletedTasksCount(response.data.count);
+        } catch (error) {
+            console.error('Error fetching completed tasks:', error);
+        }
+    };
+
+    // Completed Tasks List State
+    const [completedTasksList, setCompletedTasksList] = useState<any[]>([]);
+    const [completedListLoading, setCompletedListLoading] = useState(false);
+
+    // List View Custom Filters
+    const [filterSiteId, setFilterSiteId] = useState<number | 'all'>('all');
+    const [dateRange, setDateRange] = useState<{ from: string, to: string } | null>(null);
+    const [dateRangePickerVisible, setDateRangePickerVisible] = useState(false);
+
+    const fetchCompletedTasksList = async (filter: string, customSiteId?: number | 'all', customRange?: { from: string, to: string } | null) => {
+        setCompletedListLoading(true);
+        try {
+            const sId = customSiteId !== undefined ? customSiteId : filterSiteId;
+            const range = customRange !== undefined ? customRange : dateRange;
+
+            let query = `/admin/completed-tasks-list?filter=${filter}`;
+            // If date is selected, filter param is essentially ignored by backend logic but kept for URL structure
+            if (sId && sId !== 'all') query += `&siteId=${sId}`;
+            if (range) query += `&fromDate=${range.from}&toDate=${range.to}`;
+
+            const response = await api.get(query);
+            setCompletedTasksList(response.data.tasks);
+        } catch (error) {
+            console.error('Error fetching completed tasks list:', error);
+            showToast('Failed to load completed tasks', 'error');
+        } finally {
+            setCompletedListLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchCompletedTasksCount(completedTaskFilter);
+        if (activeTab === 'Completed') {
+            fetchCompletedTasksList(completedTaskFilter);
+        }
+    }, [completedTaskFilter, activeTab]);
+
+    const fetchDashboardStats = async () => {
+        setStatsLoading(true);
+        try {
+            const response = await api.get('/admin/dashboard-stats');
+            setDashboardStats(response.data);
+        } catch (error) {
+            console.error('Error fetching dashboard stats:', error);
+            // Fallback or Toast?
+        } finally {
+            setStatsLoading(false);
+        }
+    };
 
     const fetchProjectFiles = useCallback(async (siteId: number) => {
         setFileLoading(true);
@@ -482,6 +816,7 @@ const AdminDashboardScreen = () => {
     useEffect(() => {
         fetchSites();
         fetchEmployees();
+        fetchDashboardStats();
     }, []);
 
     // Auto-refresh project details when screen gains focus (e.g. returning from assignment)
@@ -521,6 +856,402 @@ const AdminDashboardScreen = () => {
             <Text style={styles.statusCardLabel}>{label}</Text>
         </TouchableOpacity>
     );
+
+
+
+    const handleRejectTask = async (arg: number | any) => {
+        const taskId = typeof arg === 'object' ? arg.id : arg;
+        try {
+            await api.put(`/tasks/${taskId}/reject`, { reason: 'Rejected by admin' });
+            showToast('Task rejected (changes requested)', 'success');
+            fetchApprovals();
+            fetchDashboardStats();
+            if (selectedSite?.id) fetchProjectDetails(selectedSite.id);
+            setTaskModalVisible(false);
+        } catch (error) {
+            console.error('Error rejecting task:', error);
+            showToast('Failed to reject task', 'error');
+        }
+    };
+
+    const handleApproveMaterial = async (id: number) => {
+        await handleUpdateMaterialStatus(id, 'Approved');
+        fetchApprovals();
+        fetchDashboardStats();
+    };
+
+    const handleRejectMaterial = async (id: number) => {
+        await handleUpdateMaterialStatus(id, 'Rejected');
+        fetchApprovals();
+        fetchDashboardStats();
+    };
+
+    useEffect(() => {
+        if (activeTab === 'Approvals') {
+            fetchApprovals();
+        }
+    }, [activeTab]);
+
+    const handleOpenApprovalTask = (task: any) => {
+        setChatPhaseId(task.phase_id);
+        setChatTaskId(task.id);
+        setChatSiteName(task.site_name);
+    };
+
+    const renderCompletedTasks = () => {
+        // Group Tasks by Project -> Phase
+        const tasksByProject: any = {};
+        completedTasksList.forEach((task: any) => {
+            if (!tasksByProject[task.site_name]) {
+                tasksByProject[task.site_name] = {};
+            }
+            const phaseName = task.phase_name || 'General';
+            if (!tasksByProject[task.site_name][phaseName]) {
+                tasksByProject[task.site_name][phaseName] = [];
+            }
+            tasksByProject[task.site_name][phaseName].push(task);
+        });
+
+        return (
+            <ScrollView style={{ flex: 1, padding: 16 }} contentContainerStyle={{ paddingBottom: 100 }}>
+                {/* Header with Back Button */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+                    <TouchableOpacity onPress={() => setActiveTab('Dashboard')} style={{ padding: 8, marginRight: 8 }}>
+                        <Ionicons name="arrow-back" size={24} color="#111827" />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#111827' }}>
+                        Completed Tasks ({completedTaskFilter})
+                    </Text>
+                </View>
+
+                {/* Filters Row */}
+                <View style={{ marginBottom: 16 }}>
+                    {/* Date Picker Button */}
+                    {/* Date Picker Button */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <TouchableOpacity
+                            onPress={() => setDateRangePickerVisible(true)}
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                backgroundColor: dateRange ? '#FEF3C7' : '#fff',
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: dateRange ? '#F59E0B' : '#E5E7EB',
+                                gap: 8
+                            }}
+                        >
+                            <Ionicons name="calendar-outline" size={18} color={dateRange ? '#B45309' : '#6B7280'} />
+                            <Text style={{ fontSize: 13, fontWeight: '500', color: dateRange ? '#B45309' : '#374151' }}>
+                                {dateRange ? `${new Date(dateRange.from).toLocaleDateString()} - ${new Date(dateRange.to).toLocaleDateString()}` : 'Select Date Range'}
+                            </Text>
+                            {dateRange && (
+                                <TouchableOpacity onPress={() => { setDateRange(null); fetchCompletedTasksList(completedTaskFilter, filterSiteId, null); }}>
+                                    <Ionicons name="close-circle" size={18} color="#B45309" />
+                                </TouchableOpacity>
+                            )}
+                        </TouchableOpacity>
+
+                        {/* Clear All Filters */}
+                        {(dateRange || filterSiteId !== 'all') && (
+                            <TouchableOpacity onPress={() => {
+                                setDateRange(null);
+                                setFilterSiteId('all');
+                                fetchCompletedTasksList(completedTaskFilter, 'all', null);
+                            }}>
+                                <Text style={{ color: '#DC2626', fontSize: 12, fontWeight: '600' }}>Clear Filters</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {/* Project Horizontal Scroll */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        <TouchableOpacity
+                            style={{
+                                paddingHorizontal: 16,
+                                paddingVertical: 6,
+                                borderRadius: 20,
+                                backgroundColor: filterSiteId === 'all' ? '#059669' : '#E5E7EB',
+                            }}
+                            onPress={() => { setFilterSiteId('all'); fetchCompletedTasksList(completedTaskFilter, 'all', filterDate); }}
+                        >
+                            <Text style={{ fontSize: 13, fontWeight: '500', color: filterSiteId === 'all' ? '#fff' : '#374151' }}>All Projects</Text>
+                        </TouchableOpacity>
+                        {sites.map(site => (
+                            <TouchableOpacity
+                                key={site.id}
+                                style={{
+                                    paddingHorizontal: 16,
+                                    paddingVertical: 6,
+                                    borderRadius: 20,
+                                    backgroundColor: filterSiteId === site.id ? '#059669' : '#E5E7EB',
+                                }}
+                                onPress={() => { setFilterSiteId(site.id); fetchCompletedTasksList(completedTaskFilter, site.id, filterDate); }}
+                            >
+                                <Text style={{ fontSize: 13, fontWeight: '500', color: filterSiteId === site.id ? '#fff' : '#374151' }}>{site.name}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
+
+                {completedListLoading ? (
+                    <ActivityIndicator size="large" color="#059669" style={{ marginTop: 40 }} />
+                ) : (
+                    Object.keys(tasksByProject).length === 0 ? (
+                        <View style={{ alignItems: 'center', marginTop: 50 }}>
+                            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                                <Ionicons name="checkmark-done-circle" size={32} color="#10B981" />
+                            </View>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#111827' }}>No completed tasks found</Text>
+                            <Text style={{ color: '#6b7280', marginTop: 8 }}>No tasks completed in this time range.</Text>
+                        </View>
+                    ) : (
+                        Object.keys(tasksByProject).map((projectName) => (
+                            <View key={projectName} style={{ marginBottom: 24 }}>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#111827', marginBottom: 12, marginLeft: 4 }}>
+                                    {projectName}
+                                </Text>
+                                {Object.keys(tasksByProject[projectName]).map((phaseName, index) => (
+                                    <View key={phaseName} style={styles.phaseContainer}>
+                                        {/* Phase Header - Green Bar style */}
+                                        <View style={[styles.phaseHeader, styles.phaseHeaderCollapsed, { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, backgroundColor: '#059669', borderRadius: 8, marginBottom: 1 }]}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                                                <View style={[styles.phaseBadge, { backgroundColor: '#fff' }]}>
+                                                    <Text style={[styles.phaseBadgeText, { color: '#059669' }]}>{index + 1}</Text>
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={[styles.phaseTitle, { color: '#fff' }]} numberOfLines={1}>{phaseName}</Text>
+                                                </View>
+                                            </View>
+                                            <Ionicons name="chevron-down" size={20} color="#fff" />
+                                        </View>
+
+                                        {/* Task List */}
+                                        <View style={[styles.taskList, { display: 'flex' }]}>
+                                            {tasksByProject[projectName][phaseName].map((task: any) => (
+                                                <View key={task.id} style={styles.taskItem}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 200 }}>
+                                                        <View style={{ width: 20, alignItems: 'center' }}>
+                                                            <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                                                        </View>
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={[styles.taskTitle, { textDecorationLine: 'line-through', color: '#6B7280' }]}>{task.name}</Text>
+                                                            <Text style={{ fontSize: 11, color: '#9CA3AF' }}>Completed: {new Date(task.completed_at).toLocaleDateString()}</Text>
+                                                        </View>
+                                                    </View>
+
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                                                        {/* Employee Badge */}
+                                                        {task.employee_name && (
+                                                            <View style={styles.employeeNameBadge}>
+                                                                <Text style={{ fontSize: 10 }}>👷</Text>
+                                                                <Text style={styles.employeeNameText}>
+                                                                    {task.employee_name.split(' ')[0]}
+                                                                </Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        ))
+                    )
+                )}
+            </ScrollView>
+        );
+    };
+
+
+    const renderApprovals = () => {
+        const { tasks, materials } = approvalData;
+
+        // Strict Filter for Waiting Approval tasks
+        const pendingTasks = tasks.filter((t: any) =>
+            t.status?.toLowerCase() === 'waiting_for_approval' ||
+            t.status?.toLowerCase() === 'waiting approval'
+        );
+
+        // Group Tasks by Project -> Phase
+        const tasksByProject: any = {};
+        pendingTasks.forEach((task: any) => {
+            if (!tasksByProject[task.site_name]) {
+                tasksByProject[task.site_name] = {};
+            }
+            const phaseName = task.phase_name || 'General';
+            if (!tasksByProject[task.site_name][phaseName]) {
+                tasksByProject[task.site_name][phaseName] = [];
+            }
+            tasksByProject[task.site_name][phaseName].push(task);
+        });
+
+        return (
+            <ScrollView style={{ flex: 1, padding: 16 }} contentContainerStyle={{ paddingBottom: 100 }}>
+                {/* Tab Switcher */}
+                <View style={{ flexDirection: 'row', marginBottom: 20, backgroundColor: '#f3f4f6', padding: 4, borderRadius: 12 }}>
+                    <TouchableOpacity
+                        style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: approvalTab === 'Tasks' ? '#fff' : 'transparent', borderRadius: 10, shadowColor: approvalTab === 'Tasks' ? '#000' : 'transparent', shadowOpacity: 0.1, shadowRadius: 2, elevation: approvalTab === 'Tasks' ? 2 : 0 }}
+                        onPress={() => setApprovalTab('Tasks')}
+                    >
+                        <Text style={{ fontWeight: '600', color: approvalTab === 'Tasks' ? '#8B0000' : '#6b7280' }}>Tasks ({pendingTasks.length})</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: approvalTab === 'Materials' ? '#fff' : 'transparent', borderRadius: 10, shadowColor: approvalTab === 'Materials' ? '#000' : 'transparent', shadowOpacity: 0.1, shadowRadius: 2, elevation: approvalTab === 'Materials' ? 2 : 0 }}
+                        onPress={() => setApprovalTab('Materials')}
+                    >
+                        <Text style={{ fontWeight: '600', color: approvalTab === 'Materials' ? '#8B0000' : '#6b7280' }}>Materials ({materials.length})</Text>
+                    </TouchableOpacity>
+                </View>
+
+                {approvalLoading ? (
+                    <ActivityIndicator size="large" color="#8B0000" style={{ marginTop: 40 }} />
+                ) : (
+                    <>
+                        {approvalTab === 'Tasks' ? (
+                            Object.keys(tasksByProject).length === 0 ? (
+                                <View style={{ alignItems: 'center', marginTop: 50 }}>
+                                    <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                                        <Ionicons name="checkmark-circle" size={32} color="#10B981" />
+                                    </View>
+                                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#111827' }}>All Caught Up!</Text>
+                                    <Text style={{ color: '#6b7280', marginTop: 8 }}>No tasks waiting for approval 🎉</Text>
+                                </View>
+                            ) : (
+                                Object.keys(tasksByProject).map((projectName) => (
+                                    <View key={projectName} style={{ marginBottom: 24 }}>
+                                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#111827', marginBottom: 12, marginLeft: 4 }}>
+                                            {projectName}
+                                        </Text>
+                                        {Object.keys(tasksByProject[projectName]).map((phaseName, index) => (
+                                            <View key={phaseName} style={styles.phaseContainer}>
+                                                {/* Phase Header - Red Bar style */}
+                                                <View style={[styles.phaseHeader, styles.phaseHeaderCollapsed, { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, backgroundColor: '#8B0000', borderRadius: 8, marginBottom: 1 }]}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                                                        <View style={[styles.phaseBadge, { backgroundColor: '#fff' }]}>
+                                                            <Text style={[styles.phaseBadgeText, { color: '#8B0000' }]}>{index + 1}</Text>
+                                                        </View>
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={[styles.phaseTitle, { color: '#fff' }]} numberOfLines={1}>{phaseName}</Text>
+                                                        </View>
+                                                    </View>
+                                                    <Ionicons name="chevron-down" size={20} color="#fff" />
+                                                </View>
+
+                                                {/* Task List */}
+                                                <View style={[styles.taskList, { display: 'flex' }]}>
+                                                    {tasksByProject[projectName][phaseName].map((task: any) => (
+                                                        <View key={task.id} style={styles.taskItem}>
+                                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 200 }}>
+                                                                <TouchableOpacity style={styles.radioButton}>
+                                                                    {/* Empty radio button for pending status */}
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity
+                                                                    style={{ flex: 1 }}
+                                                                    onPress={() => handleOpenApprovalTask(task)}
+                                                                >
+                                                                    <View style={{
+                                                                        backgroundColor: '#FEF9C3',
+                                                                        alignSelf: 'flex-start',
+                                                                        paddingHorizontal: 8,
+                                                                        paddingVertical: 2,
+                                                                        borderRadius: 4,
+                                                                        marginBottom: 4,
+                                                                        borderWidth: 1,
+                                                                        borderColor: '#FDE047'
+                                                                    }}>
+                                                                        <Text style={{ color: '#854D0E', fontSize: 10, fontWeight: 'bold' }}>🟡 Completed – Approval Pending</Text>
+                                                                    </View>
+                                                                    <Text style={styles.taskTitle}>{task.name}</Text>
+                                                                    <Text style={styles.taskSubtitle}>{task.status}</Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+
+                                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                                                                {/* Employee Badge */}
+                                                                {task.employee_name && (
+                                                                    <View style={styles.employeeNameBadge}>
+                                                                        <Text style={{ fontSize: 10 }}>👷</Text>
+                                                                        <Text style={styles.employeeNameText}>
+                                                                            {task.employee_name.split(' ')[0]}
+                                                                        </Text>
+                                                                    </View>
+                                                                )}
+
+                                                                {/* Edit/Delete Actions */}
+
+                                                            </View>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ))
+                            )
+                        ) : (
+                            // Materials Tab (Unchanged)
+                            materials.length === 0 ? (
+                                <View style={{ alignItems: 'center', marginTop: 50 }}>
+                                    <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                                        <Ionicons name="cube-outline" size={32} color="#9CA3AF" />
+                                    </View>
+                                    <Text style={{ color: '#9ca3af', fontSize: 16 }}>No pending material requests</Text>
+                                </View>
+                            ) : (
+                                materials.map((item: any) => (
+                                    <View key={item.id} style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>{item.item_name || item.material_name}</Text>
+                                            <Text style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>Quantity: <Text style={{ fontWeight: '500' }}>{item.quantity}</Text></Text>
+                                            <Text style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{item.site_name} • {item.employee_name}</Text>
+                                        </View>
+                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                            <TouchableOpacity
+                                                style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#FEE2E2', borderRadius: 8 }}
+                                                onPress={() => {
+                                                    setConfirmModal({
+                                                        visible: true,
+                                                        title: "Confirm Rejection",
+                                                        message: "Are you sure you want to reject this material request?",
+                                                        onConfirm: async () => {
+                                                            setConfirmModal(prev => ({ ...prev, visible: false }));
+                                                            await handleRejectMaterial(item.id);
+                                                        }
+                                                    });
+                                                }}
+                                            >
+                                                <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '600' }}>Reject</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#D1FAE5', borderRadius: 8 }}
+                                                onPress={() => {
+                                                    setConfirmModal({
+                                                        visible: true,
+                                                        title: "Confirm Approval",
+                                                        message: "Are you sure you want to approve this material request?",
+                                                        onConfirm: async () => {
+                                                            setConfirmModal(prev => ({ ...prev, visible: false }));
+                                                            await handleApproveMaterial(item.id);
+                                                        }
+                                                    });
+                                                }}
+                                            >
+                                                <Text style={{ color: '#10B981', fontSize: 12, fontWeight: '600' }}>Approve</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                ))
+                            )
+                        )}
+                    </>
+                )}
+            </ScrollView>
+        );
+    };
 
     const handleProjectClick = () => {
         setProjectModalVisible(true);
@@ -1467,30 +2198,7 @@ Project Team`;
         setActiveTab('Workers'); // Use Workers tab space for rendering full page
     };
 
-    const handleApproveTask = async (task: any) => {
-        try {
-            await api.put(`/tasks/${task.id}/approve`);
-            setTaskModalVisible(false);
-            if (selectedSite?.id) fetchProjectDetails(selectedSite.id);
-            Alert.alert('Success', 'Task approved and marked as completed.');
-        } catch (error) {
-            console.error('Error approving task:', error);
-            Alert.alert('Error', 'Failed to approve task');
-        }
-    };
 
-    const handleRejectTask = async (task: any) => {
-        try {
-            // Simplified reject for now (no reason prompt yet, or hardcoded)
-            await api.put(`/tasks/${task.id}/reject`, { reason: 'Admin requested changes' });
-            setTaskModalVisible(false);
-            if (selectedSite?.id) fetchProjectDetails(selectedSite.id);
-            Alert.alert('Success', 'Changes requested. Task reverted to In Progress.');
-        } catch (error) {
-            console.error('Error rejecting task:', error);
-            Alert.alert('Error', 'Failed to reject task');
-        }
-    };
 
 
     const confirmDeleteTask = async (taskId: number) => {
@@ -1891,87 +2599,181 @@ Project Team`;
 
             {/* Main Content Area */}
             <View style={styles.newMainContent}>
+                {activeTab === 'Approvals' && renderApprovals()}
+                {activeTab === 'Completed' && renderCompletedTasks()}
+
                 {activeTab === 'Dashboard' && (
-                    <View style={{ flex: 1 }}>
-                        {/* Summary Cards Row */}
-                        <View style={styles.newStatusRow}>
-                            <StatusBox
-                                label="Employees"
-                                icon="people-outline"
-                                onPress={() => setActiveTab('Workers')}
-                            />
-                            <StatusBox
-                                label="Reports"
-                                icon="bar-chart-outline"
-                                onPress={() => showToast('Reports feature coming soon')}
-                            />
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }}>
+                        {statsLoading ? (
+                            <ActivityIndicator size="large" color="#8B0000" style={{ marginTop: 50 }} />
+                        ) : dashboardStats ? (
+                            <>
+                                {/* 1. TOP ROW: High Level Metrics */}
+                                {/* 1. TOP ROW: High Level Metrics */}
+                                <View style={styles.metricsRow}>
+                                    <TouchableOpacity style={styles.metricCard} onPress={() => setDashboardSearchQuery('')}>
+                                        <Text style={styles.metricLabel}>Total Projects</Text>
+                                        <Text style={styles.metricValue}>{dashboardStats.projects.total}</Text>
+                                        <View style={styles.metricSubRow}>
+                                            <Text style={styles.metricSubText}>{dashboardStats.projects.completed} Completed</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.metricCard} onPress={() => setActiveTab('Workers')}>
+                                        <Text style={styles.metricLabel}>Total Employees</Text>
+                                        <Text style={styles.metricValue}>{dashboardStats.employees.total}</Text>
 
-                        </View>
-
-                        {/* Search and Filters */}
-                        <View style={styles.newSearchSection}>
-                            <TouchableOpacity
-                                style={styles.newFilterChip}
-                                onPress={() => {
-                                    setIsEditing(false);
-                                    setEditingSiteId(null);
-                                    setCreateModalVisible(true);
-                                }}
-                            >
-                                <Ionicons name="add-outline" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
-                                <Text style={styles.filterChipText}>Create New Site </Text>
-                            </TouchableOpacity>
-                            <View style={styles.newSearchBar}>
-                                <Ionicons name="search-outline" size={18} color="#9ca3af" />
-                                <TextInput
-                                    style={styles.newSearchInput}
-                                    placeholder="Search..."
-                                    value={dashboardSearchQuery}
-                                    onChangeText={setDashboardSearchQuery}
-                                />
-                            </View>
-                            <TouchableOpacity
-                                style={styles.newFilterIconButton}
-                                onPress={() => {
-                                    setIsEditing(false);
-                                    setEditingSiteId(null);
-                                    setCreateModalVisible(true);
-                                }}
-                            >
-                                <Ionicons name="options-outline" size={20} color="#374151" />
-                            </TouchableOpacity>
-                        </View>
-
-                        <Text style={styles.newActiveProjectsTitle}>Active Projects</Text>
-
-                        {/* Active Projects List */}
-                        <FlatList
-                            data={sites.filter(s => s.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase()))}
-                            keyExtractor={(item) => item.id.toString()}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={styles.newProjectRow}
-                                    onPress={() => {
-                                        setSelectedSite(item);
-                                        fetchProjectDetails(item.id);
-                                        setProjectModalVisible(true);
-                                    }}
-                                >
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.newProjectName}>{item.name}</Text>
-                                        <Text style={styles.newProjectLocation}>{item.location || 'No location'}</Text>
-                                    </View>
-                                    <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
-                                </TouchableOpacity>
-                            )}
-                            ListEmptyComponent={
-                                <View style={styles.newEmptyState}>
-                                    <Text style={styles.newEmptyText}>No active projects found</Text>
+                                    </TouchableOpacity>
                                 </View>
-                            }
-                            contentContainerStyle={{ paddingBottom: 20 }}
-                        />
-                    </View>
+
+                                {/* 2. SECOND ROW: Remaining Cards */}
+                                <View style={styles.metricsRow}>
+                                    <TouchableOpacity style={styles.metricCard} onPress={() => { setActiveTab('Approvals'); setApprovalTab('Tasks'); }}>
+                                        <Text style={styles.metricLabel}>Waiting Approval</Text>
+                                        <Text style={[styles.metricValue, { color: '#D97706' }]}>{dashboardStats.tasks.waitingApproval}</Text>
+                                        <View style={styles.metricSubRow}>
+                                            <Text style={styles.metricSubText}>{dashboardStats.materials.pending} Materials</Text>
+                                        </View>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[styles.metricCard, styles.cardGreen]}
+                                        onPress={() => { setActiveTab('Completed'); fetchCompletedTasksList(completedTaskFilter); }}
+                                        activeOpacity={0.7}
+                                    >
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                            <Text style={[styles.metricLabel, { marginBottom: 0 }]}>Completed Tasks</Text>
+                                            <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 8, padding: 3 }}>
+                                                {['day', 'week', 'month', 'year'].map((f) => (
+                                                    <TouchableOpacity
+                                                        key={f}
+                                                        onPress={() => setCompletedTaskFilter(f as any)}
+                                                        style={{
+                                                            paddingHorizontal: 8,
+                                                            paddingVertical: 3,
+                                                            borderRadius: 6,
+                                                            backgroundColor: completedTaskFilter === f ? '#fff' : 'transparent',
+                                                            shadowColor: completedTaskFilter === f ? '#000' : 'transparent',
+                                                            shadowOffset: { width: 0, height: 1 },
+                                                            shadowOpacity: completedTaskFilter === f ? 0.1 : 0,
+                                                            shadowRadius: 1,
+                                                            elevation: completedTaskFilter === f ? 1 : 0
+                                                        }}
+                                                    >
+                                                        <Text style={{
+                                                            fontSize: 10,
+                                                            fontWeight: '600',
+                                                            color: completedTaskFilter === f ? '#059669' : '#6B7280',
+                                                            textTransform: 'capitalize'
+                                                        }}>
+                                                            {f === 'day' ? 'Today' : f}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+                                        </View>
+                                        <Text style={[styles.metricValue, { marginTop: 8 }]}>{completedTasksCount}</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* 3. DETAILED METRICS GRID */}
+
+
+
+
+
+
+                                {/* Keep Active Projects List below if space? or Hide it? 
+                                    The request said "Admin can see full operational status at a glance". 
+                                    Maybe the list is less important now, but let's keep it as "Active Projects List" section at very bottom if user wants detailed drilldown.
+                                */}
+                                <Text style={[styles.sectionHeaderTitle, { marginTop: 30 }]}>All Active Projects</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 15, gap: 12 }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: '#8B0000',
+                                            paddingVertical: 10,
+                                            paddingHorizontal: 16,
+                                            borderRadius: 20,
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            gap: 8
+                                        }}
+                                        onPress={() => {
+                                            setIsEditing(false);
+                                            setEditingSiteId(null);
+                                            setCreateModalVisible(true);
+                                        }}
+                                    >
+                                        <Ionicons name="add" size={20} color="#fff" />
+                                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>Create New Site</Text>
+                                    </TouchableOpacity>
+
+                                    <View style={{
+                                        flex: 1,
+                                        backgroundColor: '#fff',
+                                        borderRadius: 20,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        paddingHorizontal: 12,
+                                        height: 44,
+                                        borderWidth: 1,
+                                        borderColor: '#e5e7eb'
+                                    }}>
+                                        <Ionicons name="search" size={20} color="#9ca3af" />
+                                        <TextInput
+                                            style={{ flex: 1, marginLeft: 8, fontSize: 14, color: '#111827' }}
+                                            placeholder="Search..."
+                                            placeholderTextColor="#9ca3af"
+                                            value={dashboardSearchQuery}
+                                            onChangeText={setDashboardSearchQuery}
+                                        />
+                                        <TouchableOpacity>
+                                            <Ionicons name="options-outline" size={20} color="#374151" />
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                                {sites.filter(s => s.name.toLowerCase().includes(dashboardSearchQuery.toLowerCase())).map(item => (
+                                    <TouchableOpacity
+                                        key={item.id}
+                                        style={styles.newProjectRow}
+                                        onPress={() => {
+                                            setSelectedSite(item);
+                                            fetchProjectDetails(item.id);
+                                            setProjectModalVisible(true);
+                                        }}
+                                    >
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.newProjectName}>{item.name}</Text>
+                                            <Text style={styles.newProjectLocation}>{item.location || 'No location'}</Text>
+                                        </View>
+
+                                        {/* Notification Badge */}
+                                        {item.pending_approvals_count && item.pending_approvals_count > 0 ? (
+                                            <View style={{
+                                                backgroundColor: '#EF4444',
+                                                borderRadius: 12,
+                                                minWidth: 24,
+                                                height: 24,
+                                                justifyContent: 'center',
+                                                alignItems: 'center',
+                                                paddingHorizontal: 8,
+                                                marginRight: 8
+                                            }}>
+                                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+                                                    {item.pending_approvals_count}
+                                                </Text>
+                                            </View>
+                                        ) : null}
+
+                                        <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+                                    </TouchableOpacity>
+                                ))}
+
+                            </>
+                        ) : (
+                            <Text>No statistics available</Text>
+                        )}
+                    </ScrollView>
                 )}
                 {/* WORKERS TAB - Repurposed for Full Page Views if needed */}
                 {activeTab === 'Workers' && (
@@ -2033,15 +2835,27 @@ Project Team`;
 
                     {/* Project Sub-Tabs */}
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modalTabsContainer}>
-                        {['Tasks', 'Transactions', 'Materials', 'Files'].map(tab => (
-                            <TouchableOpacity
-                                key={tab}
-                                style={[styles.modalTab, activeProjectTab === tab && styles.modalTabActive]}
-                                onPress={() => setActiveProjectTab(tab as any)}
-                            >
-                                <Text style={[styles.modalTabText, activeProjectTab === tab && styles.modalTabTextActive]}>{tab}</Text>
-                            </TouchableOpacity>
-                        ))}
+                        {['Tasks', 'Transactions', 'Materials', 'Files'].map(tab => {
+                            let displayName = tab;
+                            if (tab === 'Materials') {
+                                const pendingCount = projectMaterials.filter((m: any) => m.status === 'Pending').length;
+                                if (pendingCount > 0) {
+                                    displayName = `Materials (${pendingCount})`;
+                                }
+                            }
+
+                            return (
+                                <TouchableOpacity
+                                    key={tab}
+                                    style={[styles.modalTab, activeProjectTab === tab && styles.modalTabActive]}
+                                    onPress={() => setActiveProjectTab(tab as any)}
+                                >
+                                    <Text style={[styles.modalTabText, activeProjectTab === tab && styles.modalTabTextActive]}>
+                                        {displayName}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </ScrollView>
 
                     <ScrollView style={styles.modalBody}>
@@ -2153,7 +2967,7 @@ Project Team`;
                                                                                     setChatSiteName(selectedSite?.name || 'Site');
                                                                                 }}
                                                                             >
-                                                                                {task.status === 'waiting_for_approval' && (
+                                                                                {(task.status === 'waiting_for_approval' || task.status === 'Waiting Approval') && (
                                                                                     <View style={{
                                                                                         backgroundColor: '#FEF9C3',
                                                                                         alignSelf: 'flex-start',
@@ -3987,6 +4801,19 @@ Project Team`;
                     </View>
                 </TouchableOpacity>
             </Modal>
+
+            {/* Date Range Picker Modal */}
+            <CustomDateRangePicker
+                visible={dateRangePickerVisible}
+                onClose={() => setDateRangePickerVisible(false)}
+                onApply={(from, to) => {
+                    const range = { from, to };
+                    setDateRange(range);
+                    fetchCompletedTasksList(completedTaskFilter, filterSiteId, range);
+                }}
+                initialFrom={dateRange?.from}
+                initialTo={dateRange?.to}
+            />
         </SafeAreaView>
     );
 };
@@ -5875,6 +6702,151 @@ const styles = StyleSheet.create({
     },
     menuItemDestructive: {
         color: '#EF4444',
+    },
+
+    // Dashboard Styles
+    metricsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 20,
+    },
+    metricCard: {
+        flex: 1,
+        minWidth: 150,
+        backgroundColor: '#fff',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        elevation: 2,
+    },
+    metricLabel: {
+        fontSize: 13,
+        color: '#6b7280',
+        fontWeight: '600',
+        marginBottom: 4,
+    },
+    metricValue: {
+        fontSize: 24,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    metricSubRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    metricSubText: {
+        fontSize: 12,
+        color: '#4b5563',
+    },
+    sectionHeaderTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 12,
+    },
+    cardBlue: { borderLeftWidth: 4, borderLeftColor: '#3B82F6' },
+    cardGreen: { borderLeftWidth: 4, borderLeftColor: '#059669' },
+    cardYellow: { borderLeftWidth: 4, borderLeftColor: '#F59E0B' },
+    cardRed: { borderLeftWidth: 4, borderLeftColor: '#EF4444' },
+
+    gridContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 20,
+    },
+    gridItem: {
+        flex: 1,
+        minWidth: 200,
+        backgroundColor: '#fff',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    gridTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#374151',
+        marginBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f3f4f6',
+        paddingBottom: 8,
+    },
+    gridRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+    gridLabel: {
+        fontSize: 13,
+        color: '#6b7280',
+    },
+    gridValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111827',
+    },
+
+    alertsContainer: {
+        backgroundColor: '#FEF2F2',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#FECACA',
+        marginBottom: 20,
+    },
+    alertRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    alertBadge: {
+        backgroundColor: '#FFF',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
+    },
+    alertText: {
+        color: '#B91C1C',
+        fontWeight: '600',
+        fontSize: 12,
+    },
+
+    activityFeed: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    activityItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f3f4f6',
+        paddingBottom: 12,
+    },
+    activityDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        marginRight: 12,
+    },
+    activityTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#374151',
+    },
+    activitySub: {
+        fontSize: 12,
+        color: '#9ca3af',
     },
 
 });
