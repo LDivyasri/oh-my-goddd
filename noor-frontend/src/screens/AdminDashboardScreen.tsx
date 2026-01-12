@@ -1492,7 +1492,7 @@ const AdminDashboardScreen = () => {
                                 }}
                             >
                                 <Ionicons name="add-outline" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
-                                <Text style={styles.filterChipText}>Site</Text>
+                                <Text style={styles.filterChipText}>Create New Site </Text>
                             </TouchableOpacity>
                             <View style={styles.newSearchBar}>
                                 <Ionicons name="search-outline" size={18} color="#9ca3af" />
@@ -1941,7 +1941,7 @@ const AdminDashboardScreen = () => {
                                     {/* File Type Tabs */}
                                     <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
                                         {['Media'].map(tab => (
-                                            <TouchableOpacity
+                                            <View
                                                 key={tab}
                                                 style={{
                                                     flex: 1,
@@ -1955,14 +1955,13 @@ const AdminDashboardScreen = () => {
                                                     shadowRadius: 2,
                                                     elevation: activeFileTab === tab ? 2 : 0
                                                 }}
-                                                onPress={() => setActiveFileTab(tab as any)}
                                             >
                                                 <Text style={{
                                                     fontWeight: '600',
                                                     color: activeFileTab === tab ? '#8B0000' : '#6b7280',
                                                     fontSize: 13
                                                 }}>{tab}</Text>
-                                            </TouchableOpacity>
+                                            </View>
                                         ))}
                                     </View>
 
